@@ -1,0 +1,96 @@
+{
+  "timestamp": "2026-05-05T10:30:00+07:00",
+  "decision": "NO-GO",
+  "position_decision": "REJECT",
+  "signal_ref": "signal-output.json",
+  "risk_manager": "Reza",
+  "session_number": 1,
+
+  "account": {
+    "equity": 10000,
+    "equity_note": "PLACEHOLDER — perlu konfirmasi saldo real/demo Ahmad",
+    "peak_equity": 10000,
+    "drawdown_pct": 0.00,
+    "drawdown_limit_pct": 10.00,
+    "open_positions": 0,
+    "max_positions": 2,
+    "account_status": "CLEAR"
+  },
+
+  "signal_quality": {
+    "farida_signal": "HOLD",
+    "farida_signal_category": "HOLD",
+    "farida_confidence": 0.37,
+    "zara_final_decision": "NO_TRADE",
+    "zara_adjusted_confidence": 0.35,
+    "zara_agreement_score": 0.88,
+    "confluence_score": 3,
+    "confidence_threshold": 0.50,
+    "confidence_met": false,
+    "active_warnings": [
+      "RSI 43.2 bukan oversold — tidak ada kelelahan penjual maksimum",
+      "Belum ada candle confirmation di zona support",
+      "Trend hanya 'Sedang' — bobot dikurangi 50%",
+      "Asia session (03:15 UTC) — EUR/USD M15 kurang reliable",
+      "MA 50 H1 di 1.1230 adalah level kritis — break akan invalidasi setup"
+    ]
+  },
+
+  "trade_parameters": null,
+
+  "reject_reasons": [
+    {
+      "code": "ZARA_NO_TRADE",
+      "priority": "CRITICAL",
+      "description": "Zara (AI Predictor) mengeluarkan final_decision = NO_TRADE. Ini adalah hard rule — Reza tidak membuka posisi jika Zara NO_TRADE, tanpa exception."
+    },
+    {
+      "code": "CONFIDENCE_BELOW_THRESHOLD",
+      "priority": "CRITICAL",
+      "description": "Adjusted confidence 0.35 < threshold minimum 0.50 yang ditetapkan Ahmad. Basis probabilistik untuk trade tidak mencukupi."
+    },
+    {
+      "code": "SIGNAL_IS_HOLD",
+      "priority": "HIGH",
+      "description": "Sinyal dari Farida adalah HOLD, bukan BUY/SELL. Tidak ada entry yang direkomendasikan oleh market analyst."
+    },
+    {
+      "code": "NO_CANDLE_CONFIRMATION",
+      "priority": "HIGH",
+      "description": "Hard gate Farida aktif — tidak ada candle confirmation (pin bar / bullish engulfing) di zona support. Entry sekarang adalah spekulasi murni, bukan entry berbasis evidens."
+    },
+    {
+      "code": "ASIA_SESSION_TIMING",
+      "priority": "MEDIUM",
+      "description": "Signal dibuat pukul 03:15 UTC — tengah sesi Asia. EUR/USD M15 volume rendah di sesi ini, sinyal kurang reliable. Bukan alasan utama REJECT, tapi memperkuat keputusan."
+    }
+  ],
+
+  "watchlist": {
+    "added": true,
+    "pair": "EUR/USD",
+    "reason": "Setup memiliki potensi — trend bullish sedang, support ganda (S/R + MA 50 H1), divergensi bullish lemah dari Zara. Tidak cukup kuat sekarang tapi layak dipantau.",
+    "re_evaluate_when": [
+      "Sesi London buka (07:00 UTC)",
+      "Muncul candle confirmation bullish (pin bar / engulfing) di zona 1.1230–1.1240",
+      "RSI naik di atas 45",
+      "Semua tiga kondisi harus terpenuhi bersamaan"
+    ],
+    "invalidated_if": "Harga break di bawah support 1.1228 — invalidasi setup bullish sepenuhnya"
+  },
+
+  "risk_notes": [
+    "Keputusan ini sepenuhnya berbasis risiko, bukan sinyal teknikal. Dari perspektif teknikal, setup EUR/USD cukup menarik (confluence 3/3). Tapi confidence pipeline tidak cukup untuk justify risiko kapital.",
+    "Reza lebih konservatif dari Farida dan Zara. Bahkan jika Zara memberikan WAIT (bukan NO_TRADE), Reza masih perlu melihat confidence ≥ 0.50 sebelum masuk evaluasi lebih lanjut.",
+    "Equity $10,000 adalah placeholder. Kalkulasi lot tidak dilakukan karena trade di-REJECT, tapi untuk referensi: 1% risk = $100. Dengan SL perkiraan 20 pip, lot yang akan dihitung = 0.50."
+  ],
+
+  "no_go_reasons": [
+    "Zara NO_TRADE override aktif",
+    "Confidence 0.35 di bawah threshold minimum 0.50",
+    "Sinyal Farida adalah HOLD — tidak ada rekomendasi entry"
+  ],
+
+  "workflow": "forex-risk-management-gate",
+  "next_step": "MONITORING — re-evaluate saat London open jika kondisi watchlist terpenuhi"
+}

@@ -1,0 +1,16 @@
+# DO NOT EDIT -- overwritten on every update.
+#
+# Agent customization surface for forex-agent-market-analyst.
+# Team overrides:     {project-root}/_bmad/custom/forex-agent-market-analyst.toml
+# Personal overrides: {project-root}/_bmad/custom/forex-agent-market-analyst.user.toml
+
+[agent]
+
+# --- Metadata (install-time roster contract) ---
+
+code = "market-analyst"
+name = "Farida"
+title = "Market Analyst"
+icon = "📈"
+description = "Analis teknikal forex yang menghasilkan sinyal BUY/SELL/HOLD berbasis MA, RSI, dan Support/Resistance."
+agent_type = "stateless"

@@ -1,0 +1,90 @@
+{
+  "timestamp": "2026-05-05T16:15:00+07:00",
+  "pair": "EUR/USD",
+  "timeframe": "M15",
+  "signal": "BUY",
+  "signal_category": "Strong Buy",
+  "confluence_score": 3,
+  "confidence_score": 0.85,
+  "score_breakdown": {
+    "trend_score": 0.9,
+    "trend_weight": 0.35,
+    "momentum_score": 0.9,
+    "momentum_weight": 0.35,
+    "structure_score": 0.9,
+    "structure_weight": 0.30,
+    "candle_confirmed": true,
+    "confirmation_multiplier": 1.0,
+    "base_score": 0.900,
+    "pre_cap_score": 0.900,
+    "confidence_cap": 0.85,
+    "final_score": 0.85,
+    "cap_applied": true,
+    "cap_reason": "Anti-overconfidence rule: max confidence = 0.85. Market selalu mengandung ketidakpastian yang tidak bisa dieliminasi — RSI baru exit oversold (30.5), support 4-touch (breakout risk di attempt ke-5), setup textbook meningkatkan institutional trap risk."
+  },
+  "hard_gate_triggered": null,
+  "analysis": {
+    "trend": {
+      "bias": "Bullish",
+      "strength": "Kuat",
+      "score_rationale": "0.9 — MA20 (1.1268) >> MA50 (1.1235), gap 33 pip, slope tajam (~+3 pip/candle). H1 aligned bullish. Kondisi terbaik yang sistem kenali.",
+      "configuration": "MA20 (1.1268) >> MA50 (1.1235). Gap 33 pip. Slope MA20 tajam. Pullback sehat di antara MA50 dan MA20.",
+      "htf_aligned": true,
+      "htf_note": "H1: price di atas MA20 dan MA50 H1. Pullback M15 = retracement normal uptrend H1."
+    },
+    "momentum": {
+      "rsi_value": 30.5,
+      "rsi_low": 28.2,
+      "zone": "Oversold",
+      "direction": "Naik",
+      "score_rationale": "0.9 — RSI menyentuh oversold (28.2), sekarang 30.5 dan naik. Divergensi bullish kuat terdeteksi. Row pertama tabel momentum.",
+      "divergence": "Bullish-Kuat",
+      "divergence_detail": "Harga lower low (1.1240 → 1.1228), RSI higher low (27.1 → 28.2). Momentum penjual melemah progresif.",
+      "kesesuaian": "Selaras Sempurna"
+    },
+    "structure": {
+      "nearest_resistance": 1.1288,
+      "nearest_resistance_strength": "Kuat",
+      "nearest_support": 1.1233,
+      "nearest_support_strength": "Kuat",
+      "support_layers": [
+        "S/R historis 4-touch di 1.1230–1.1237",
+        "MA50 M15 dinamis di 1.1235",
+        "H1 retracement level"
+      ],
+      "score_rationale": "0.9 — Triple-layer support + bullish engulfing yang memangkas candle bearish sebelumnya sepenuhnya. Support ditolak langsung setelah penetrasi ke 1.1228.",
+      "price_position": "Tepat di Support",
+      "room_to_target_pips": 55,
+      "room_to_stop_pips": 14,
+      "candle_confirmation": true,
+      "candle_type": "Bullish Engulfing",
+      "candle_detail": "Prev bearish (open 1.1244, close 1.1229) diengulf penuh oleh bullish (open 1.1228, close 1.1246)."
+    }
+  },
+  "session_context": {
+    "session": "London",
+    "utc_time": "09:15 UTC",
+    "volume": "Tinggi",
+    "reliability": "Sangat Reliable untuk EUR/USD M15"
+  },
+  "reasoning": "EUR/USD membentuk bullish engulfing di zona support triple-layer (S/R historis + MA50 M15 + H1 retracement) selama sesi London. RSI keluar dari oversold (28.2 → 30.5) dengan divergensi bullish kuat — semua tiga lensa selaras pada level sangat kuat (masing-masing 0.9). Confidence di-cap pada 0.85 karena tidak ada kondisi pasar yang pasti: RSI baru 2 candle keluar dari oversold, support sudah ditest 4 kali (setiap attempt berikutnya meningkatkan breakout risk), dan setup yang sangat textbook meningkatkan probabilitas institutional stop hunt.",
+  "warnings": [
+    "TEXTBOOK TRAP RISK: RSI oversold + support kuat + engulfing = pola buku teks yang diketahui institusional. Waspadai false break di bawah 1.1228 sebelum harga naik.",
+    "SUPPORT SENESCENCE: Level 1.1230 sudah ditest 4 kali. Setiap test berikutnya melemahkan support — break permanen lebih mungkin terjadi di sini dari sebelumnya.",
+    "RSI BORDERLINE: 30.5 hanya 0.5 poin di atas zona oversold. Belum cukup momentum untuk konfirmasi exit yang kuat — perlu pantau candle berikutnya.",
+    "RESISTANCE 1.1288: 4-touch level. Jika harga mencapai level ini tanpa momentum kuat, kemungkinan rejection tinggi — perhatikan tanda-tanda di sekitar level ini untuk partial TP."
+  ],
+  "recommended_entry_zone": "1.1233 – 1.1242 (dalam support zone — limit order lebih disukai dari market order)",
+  "wait_for": null,
+  "price_snapshot": {
+    "current_price": 1.1246,
+    "ma_20": 1.1268,
+    "ma_50": 1.1235,
+    "rsi": 30.5,
+    "rsi_low_session": 28.2,
+    "support_zone": "1.1230 – 1.1237",
+    "resistance_zone": "1.1285 – 1.1290"
+  },
+  "workflow": "forex-market-analysis-signal",
+  "next_step": "forex-risk-management-gate"
+}

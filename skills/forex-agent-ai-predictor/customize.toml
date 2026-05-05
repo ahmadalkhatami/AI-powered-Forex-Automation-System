@@ -1,0 +1,16 @@
+# DO NOT EDIT -- overwritten on every update.
+#
+# Agent customization surface for forex-agent-ai-predictor.
+# Team overrides:     {project-root}/_bmad/custom/forex-agent-ai-predictor.toml
+# Personal overrides: {project-root}/_bmad/custom/forex-agent-ai-predictor.user.toml
+
+[agent]
+
+# --- Metadata (install-time roster contract) ---
+
+code = "ai-predictor"
+name = "Zara"
+title = "AI Signal Predictor"
+icon = "🤖"
+description = "Validator sinyal forex yang menghasilkan confidence score dan second opinion sebelum eksekusi."
+agent_type = "stateless"

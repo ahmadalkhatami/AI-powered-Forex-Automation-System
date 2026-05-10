@@ -20,8 +20,11 @@ public class RiskController : ControllerBase
         [FromBody] EvaluateRiskRequest request,
         CancellationToken ct)
     {
+        if (!Enum.TryParse<SignalDirection>(request.FinalDecision, ignoreCase: true, out var direction))
+            return BadRequest(new { error = $"Invalid finalDecision: '{request.FinalDecision}'. Valid values: BUY, SELL, HOLD" });
+
         var predictor = new PredictorResult(
-            FinalDecision: Enum.Parse<SignalDirection>(request.FinalDecision, ignoreCase: true),
+            FinalDecision: direction,
             AdjustedConfidence: request.AdjustedConfidence,
             TotalScore: request.TotalScore,
             AgreementScore: request.AgreementScore,

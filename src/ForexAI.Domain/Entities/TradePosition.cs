@@ -1,0 +1,153 @@
+using ForexAI.Domain.Enums;
+
+namespace ForexAI.Domain.Entities;
+
+public class TradePosition
+{
+    public string TradeId { get; private set; }
+    public string RunId { get; private set; }
+    public TradeStatus Status { get; private set; }
+    public string Pair { get; private set; }
+    public SignalDirection Direction { get; private set; }
+    public decimal Entry { get; private set; }
+    public decimal StopLoss { get; private set; }
+    public decimal TakeProfit { get; private set; }
+    public decimal LotSize { get; private set; }
+    public decimal RiskAmount { get; private set; }
+    public decimal PotentialProfit { get; private set; }
+    public decimal RiskReward { get; private set; }
+    public decimal FloatingPnl { get; private set; }
+    public int FloatingPnlPips { get; private set; }
+    public DateTimeOffset? OpenedAt { get; private set; }
+    public DateTimeOffset? ClosedAt { get; private set; }
+    public string Mode { get; private set; }
+    public string? SkipReason { get; private set; }
+
+    // Required for ORM/serialization
+    private TradePosition() { TradeId = null!; RunId = null!; Pair = null!; Mode = null!; }
+
+    public static TradePosition CreateSimulated(
+        string tradeId,
+        string runId,
+        string pair,
+        SignalDirection direction,
+        decimal entry,
+        decimal stopLoss,
+        decimal takeProfit,
+        decimal lotSize,
+        decimal riskAmount,
+        decimal potentialProfit,
+        decimal riskReward)
+    {
+        return new TradePosition
+        {
+            TradeId = tradeId,
+            RunId = runId,
+            Status = TradeStatus.ACTIVE,
+            Pair = pair,
+            Direction = direction,
+            Entry = entry,
+            StopLoss = stopLoss,
+            TakeProfit = takeProfit,
+            LotSize = lotSize,
+            RiskAmount = riskAmount,
+            PotentialProfit = potentialProfit,
+            RiskReward = riskReward,
+            FloatingPnl = 0m,
+            FloatingPnlPips = 0,
+            OpenedAt = DateTimeOffset.UtcNow,
+            Mode = "SIMULATION"
+        };
+    }
+
+    public static TradePosition CreateSkipped(string tradeId, string runId, string pair, string skipReason)
+    {
+        return new TradePosition
+        {
+            TradeId = tradeId,
+            RunId = runId,
+            Status = TradeStatus.SKIPPED,
+            Pair = pair,
+            Direction = SignalDirection.HOLD,
+            Entry = 0,
+            StopLoss = 0,
+            TakeProfit = 0,
+            LotSize = 0,
+            RiskAmount = 0,
+            PotentialProfit = 0,
+            RiskReward = 0,
+            Mode = "SIMULATION",
+            SkipReason = skipReason
+        };
+    }
+
+    public static TradePosition CreateFromHistory(
+        string tradeId,
+        string runId,
+        string pair,
+        SignalDirection direction,
+        decimal entry,
+        decimal stopLoss,
+        decimal takeProfit,
+        decimal lotSize,
+        decimal riskAmount,
+        decimal potentialProfit,
+        decimal riskReward,
+        decimal floatingPnl,
+        int floatingPnlPips,
+        DateTimeOffset? openedAt,
+        DateTimeOffset? closedAt,
+        TradeStatus status,
+        string mode)
+    {
+        return new TradePosition
+        {
+            TradeId = tradeId,
+            RunId = runId,
+            Status = status,
+            Pair = pair,
+            Direction = direction,
+            Entry = entry,
+            StopLoss = stopLoss,
+            TakeProfit = takeProfit,
+            LotSize = lotSize,
+            RiskAmount = riskAmount,
+            PotentialProfit = potentialProfit,
+            RiskReward = riskReward,
+            FloatingPnl = floatingPnl,
+            FloatingPnlPips = floatingPnlPips,
+            OpenedAt = openedAt,
+            ClosedAt = closedAt,
+            Mode = mode
+        };
+    }
+
+    public bool IsActive() => Status == TradeStatus.ACTIVE;
+
+    public void UpdateFloatingPnl(decimal currentPrice)
+    {
+        if (Status != TradeStatus.ACTIVE) return;
+
+        decimal pipValue = Direction == SignalDirection.BUY
+            ? currentPrice - Entry
+            : Entry - currentPrice;
+
+        FloatingPnlPips = (int)(pipValue * 10000);
+        FloatingPnl = Math.Round(pipValue * LotSize * 100000 * 0.0001m, 2);
+
+        if (Direction == SignalDirection.BUY && currentPrice <= StopLoss)
+            Close(TradeStatus.CLOSED_LOSS);
+        else if (Direction == SignalDirection.BUY && currentPrice >= TakeProfit)
+            Close(TradeStatus.CLOSED_WIN);
+        else if (Direction == SignalDirection.SELL && currentPrice >= StopLoss)
+            Close(TradeStatus.CLOSED_LOSS);
+        else if (Direction == SignalDirection.SELL && currentPrice <= TakeProfit)
+            Close(TradeStatus.CLOSED_WIN);
+    }
+
+    private void Close(TradeStatus outcome)
+    {
+        Status = outcome;
+        ClosedAt = DateTimeOffset.UtcNow;
+    }
+}

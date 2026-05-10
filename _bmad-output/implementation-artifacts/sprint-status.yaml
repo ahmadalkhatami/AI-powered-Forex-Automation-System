@@ -1,0 +1,44 @@
+# Sprint Status — AI-powered Forex Automation System
+# Last updated: 2026-05-10
+#
+# STATUS DEFINITIONS:
+#   backlog       - Story defined in epics, not yet processed by create-story
+#   ready-for-dev - Story file created, ready for dev agent
+#   in-progress   - Dev agent currently working on this story
+#   done          - Story complete, code reviewed
+#   skipped       - Story deliberately skipped
+
+last_updated: "2026-05-10"
+
+development_status:
+  # --- Epic 1: Infrastructure & API Layer ---
+  epic-1: review
+
+  1-1-json-file-repositories: review
+  1-2-market-data-stub-signal-analyzer: review
+  1-3-rule-based-risk-evaluator: review
+  1-4-api-controllers-program-wiring: review
+  1-5-end-to-end-pipeline-smoke-test: review
+
+  # --- Epic 2: Frontend Foundation ---
+  epic-2: backlog
+
+  2-1-nextjs-project-setup: ready-for-dev
+  2-2-layout-shell-modebanner-header: ready-for-dev
+  2-3-signal-hero-component: ready-for-dev
+  2-4-trade-parameters-card: ready-for-dev
+
+  # --- Epic 3: Frontend Actions & Analysis Panels ---
+  epic-3: backlog
+
+  3-1-approve-reject-actions: ready-for-dev
+  3-2-signal-analysis-panel: ready-for-dev
+  3-3-risk-gate-panel: ready-for-dev
+
+  # --- Epic 4: Frontend Sidebar, Integration & Polish ---
+  epic-4: backlog
+
+  4-1-account-health-position-card: ready-for-dev
+  4-2-api-integration-layer: ready-for-dev
+  4-3-trade-history-page: ready-for-dev
+  4-4-dark-mode-responsive-a11y: ready-for-dev

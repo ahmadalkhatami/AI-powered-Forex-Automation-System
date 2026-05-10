@@ -1,0 +1,152 @@
+{
+  "timestamp": "2026-05-05T14:33:00+07:00",
+  "pair": "EUR/USD",
+  "timeframe": "M15",
+  "signal_ref": "signal-output.json",
+  "run_id": "RUN-20260505-002",
+  "predictor": "Zara",
+  "rules_version": "updated-v2",
+
+  "input_summary": {
+    "farida_signal": "BUY",
+    "farida_confidence": 0.66,
+    "farida_confluence": 3,
+    "farida_candle_confirmed": true,
+    "farida_session": "London Open (07:30 UTC)",
+    "farida_rsi": 57.2,
+    "farida_rsi_direction": "Rising"
+  },
+
+  "predictor_validation": {
+    "final_decision": "BUY",
+    "adjusted_confidence": 0.69,
+    "confidence_range": "VALID (cautious) — 0.55–0.70",
+    "agreement_score": 0.93,
+    "override_signal": null,
+    "override_reason": null,
+
+    "score_breakdown": {
+      "layer1_internal_consistency": 27,
+      "layer1_max": 30,
+      "layer2_market_context": 36,
+      "layer2_max": 40,
+      "layer3_pattern_recognition": 20,
+      "layer3_max": 30,
+      "total_score": 83,
+      "total_max": 100,
+      "confidence_level": "HIGH",
+      "threshold_high": 75,
+      "threshold_medium": 60
+    },
+
+    "adjustment": {
+      "base_confidence_farida": 0.66,
+      "adjustment_applied": +0.03,
+      "max_allowed": 0.05,
+      "final_confidence": 0.69,
+      "adjustment_rationale": "London Open mengurangi uncertainty dibanding Asia session. Triple confluence clean tanpa reducers. Candle confirmation hadir. Tidak dinaikan ke +0.05 karena slope trend moderat dan resistance dekat (1.1290 hanya 15 pip)."
+    },
+
+    "layer1_detail": {
+      "score": 27,
+      "verdict": "CONSISTENT",
+      "math_check": "PASSED — base_score 0.6625 terverifikasi, final_score identik, cap tidak perlu",
+      "flags": [
+        {
+          "severity": "MINOR",
+          "item": "Structure score 0.75 vs nilai optimal 0.80",
+          "detail": "Support flip + 3-candle confirmation secara teknikal memenuhi kriteria untuk 0.80 (support kuat + candle standard). Farida menggunakan 0.75 karena candle bukan textbook engulfing — ini adalah konservatisme yang valid, bukan kesalahan. Tidak mengubah outcome."
+        }
+      ],
+      "hard_gates_recheck": {
+        "gate1_no_confirmation_base_low": "NOT_TRIGGERED — candle confirmation ada",
+        "gate2_trend_sideways": "NOT_TRIGGERED — trend classified Bullish (gap 14 pip > threshold)",
+        "gate3_rsi_above_65": "NOT_TRIGGERED — RSI 57.2",
+        "gate4_price_middle_range": "NOT_TRIGGERED — price di lower half, near support"
+      }
+    },
+
+    "layer2_detail": {
+      "score": 36,
+      "session": "London Open (07:30 UTC)",
+      "session_assessment": "POSITIVE — sesi terbaik untuk EUR/USD M15. Volume tinggi, tren lebih reliable, spread tight. Per updated rules: Asia penalty max -5, tapi ini London = tidak ada penalty, ada bonus reliabilitas.",
+      "session_impact": +6,
+      "news_events_4h": "CLEAN — tidak ada high-impact EUR/USD dalam 4 jam ke depan",
+      "news_impact": +5,
+      "volatility": "NORMAL — tidak ada candle abnormal, tidak ada institutional spike tak teridentifikasi",
+      "volatility_impact": +3,
+      "macro": "EUR slight positive, USD neutral — aligned dengan arah BUY",
+      "macro_impact": +2
+    },
+
+    "layer3_detail": {
+      "score": 20,
+      "boosters_found": [
+        {
+          "pattern": "Triple confluence",
+          "points": +15,
+          "detail": "Trend MA (Bullish) + RSI (rising, valid per updated rules) + S/R (support flip bounce) — semua tiga lensa aligned ke BUY. Kondisi probabilistik terkuat dalam sistem."
+        },
+        {
+          "pattern": "Support structure validated",
+          "points": +5,
+          "detail": "Support flip 1.1248-1.1252 ditest pada candle -1 (low 1.1248) dan ditolak. Entry 23 pip dari zone (tidak memenuhi +10 poin 'within 5 pip'), tapi trade structure validated dari level 3-touch. Partial credit."
+        }
+      ],
+      "reducers_checked": [
+        {"reducer": "Entry di tengah range", "result": "NOT_APPLIED", "reason": "Harga di lower half range, dekat support"},
+        {"reducer": "Counter-trend entry", "result": "NOT_APPLIED", "reason": "Semua MA bullish, direction aligned"},
+        {"reducer": "RSI netral tanpa momentum", "result": "NOT_APPLIED", "reason": "RSI 57.2 di atas 55, rising +8.9 — per updated rules: no penalty. Bukan stagnan."},
+        {"reducer": "Setup terlalu sempurna (trap)", "result": "NOT_APPLIED", "reason": "Setup moderate, bukan extreme textbook. RSI tidak extreme, candle tidak sempurna — justru mengurangi institutional trap risk."}
+      ]
+    },
+
+    "validation_notes": [
+      "VALIDATED: Analisis Farida konsisten secara internal dan tidak ada konflik data yang terdeteksi. Keputusan BUY didukung oleh tiga dimensi yang selaras tanpa kontradiksi.",
+      "LONDON SESSION ADVANTAGE: Berbeda dari run sebelumnya yang di Asia (02:30 UTC) dengan uncertainty tinggi, ini adalah London Open — sesi prime time EUR/USD. Ini adalah perbaikan konteks yang signifikan.",
+      "RSI RULE APPLIED: RSI 57.2 rising tidak mendapat penalty. Per updated rules, RSI 45-55 = no penalty; RSI 57.2 adalah di atas itu DAN naik +8.9 dalam 3 jam. Ini adalah momentum signal yang valid.",
+      "TRIPLE CONFLUENCE CLEAN: Ketiga lensa agree tanpa partial conflict. Trend direction, RSI direction, dan structure direction semua pointing BUY. Tidak ada yang neutral-conflicting.",
+      "MINOR OBSERVATION: Structure score 0.75 sedikit konservatif (justified untuk 0.80). Ini bukan ketidakakuratan — ini adalah kehati-hatian Farida yang legitimate. Tidak perlu override.",
+      "RESISTANCE PROXIMITY FLAG: Resistance minor 1.1290 hanya 15 pip dari entry. Ini adalah trade management concern, bukan sinyal invalidation. Risk Gate perlu mempertimbangkan partial TP di 1.1290 atau TP utama di 1.1313."
+    ],
+
+    "conflict_with_farida": {
+      "has_material_conflict": false,
+      "minor_difference": "Structure score bisa 0.75–0.80 (Farida menggunakan ujung bawah range). Tidak mengubah signal atau confidence tier.",
+      "direction_agreement": true,
+      "category_agreement": true
+    },
+
+    "zara_confidence_mapped": {
+      "farida_input": 0.66,
+      "zara_adjusted": 0.69,
+      "decision_tier": "VALID (cautious)",
+      "tier_range": "0.55–0.70",
+      "position_in_tier": "Upper end — 0.69 dari range max 0.70",
+      "next_tier_gap": 0.01,
+      "note": "0.69 adalah 0.01 dari batas STRONG VALIDATION (>0.70). Setup ini sangat dekat ke tier lebih kuat — hanya butuh satu dari: slope trend sedikit lebih kuat, atau RSI di 42–48 dengan bounce, atau textbook engulfing."
+    },
+
+    "validated_at": "2026-05-05T14:33:00+07:00"
+  },
+
+  "forward_to_risk_gate": {
+    "recommended": true,
+    "signal": "BUY",
+    "confidence": 0.69,
+    "risk_gate_flags": [
+      "Resistance minor 1.1290 hanya 15 pip dari entry — Risk Gate harus pertimbangkan TP1 di 1.1290 sebagai partial exit atau trailing stop",
+      "R/R ke TP1 (1.1290): 0.92 — di bawah 1.0, tidak ideal. R/R ke TP2 (1.1313): 1.88 — acceptable. Risk Gate sebaiknya menggunakan TP2.",
+      "Entry zone optimal: 1.1268–1.1275 (limit order lebih baik dari market order untuk menghindari slippage)"
+    ],
+    "entry_zone": "1.1268 – 1.1275",
+    "stop_loss": 1.1244,
+    "take_profit_primary": 1.1313,
+    "risk_reward_primary": 1.88,
+    "invalidation_level": 1.1244
+  },
+
+  "workflow": "forex-agent-ai-predictor",
+  "next_step": "forex-risk-management-gate",
+  "run_id": "RUN-20260505-002"
+}

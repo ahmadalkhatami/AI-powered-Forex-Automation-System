@@ -1,7 +1,7 @@
 using ForexAI.Domain.Interfaces;
 using ForexAI.Domain.ValueObjects;
 
-namespace ForexAI.Infrastructure.Broker.Oanda;
+namespace ForexAI.Infrastructure.Broker;
 
 public class NullBrokerService : IBrokerService
 {

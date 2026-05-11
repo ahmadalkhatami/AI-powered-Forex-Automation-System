@@ -22,6 +22,7 @@ public class TradePosition
     public DateTimeOffset? ClosedAt { get; private set; }
     public string Mode { get; private set; }
     public string? SkipReason { get; private set; }
+    public string? ExternalTradeId { get; private set; }
 
     // Required for ORM/serialization
     private TradePosition() { TradeId = null!; RunId = null!; Pair = null!; Mode = null!; }
@@ -57,6 +58,43 @@ public class TradePosition
             FloatingPnlPips = 0,
             OpenedAt = DateTimeOffset.UtcNow,
             Mode = "SIMULATION"
+        };
+    }
+
+    public static TradePosition CreateBrokerExecuted(
+        string tradeId,
+        string runId,
+        string pair,
+        SignalDirection direction,
+        decimal entry,
+        decimal stopLoss,
+        decimal takeProfit,
+        decimal lotSize,
+        decimal riskAmount,
+        decimal potentialProfit,
+        decimal riskReward,
+        string mode,
+        string? externalTradeId)
+    {
+        return new TradePosition
+        {
+            TradeId = tradeId,
+            RunId = runId,
+            Status = TradeStatus.ACTIVE,
+            Pair = pair,
+            Direction = direction,
+            Entry = entry,
+            StopLoss = stopLoss,
+            TakeProfit = takeProfit,
+            LotSize = lotSize,
+            RiskAmount = riskAmount,
+            PotentialProfit = potentialProfit,
+            RiskReward = riskReward,
+            FloatingPnl = 0m,
+            FloatingPnlPips = 0,
+            OpenedAt = DateTimeOffset.UtcNow,
+            Mode = mode,
+            ExternalTradeId = externalTradeId
         };
     }
 
@@ -98,7 +136,8 @@ public class TradePosition
         DateTimeOffset? openedAt,
         DateTimeOffset? closedAt,
         TradeStatus status,
-        string mode)
+        string mode,
+        string? externalTradeId = null)
     {
         return new TradePosition
         {
@@ -118,7 +157,8 @@ public class TradePosition
             FloatingPnlPips = floatingPnlPips,
             OpenedAt = openedAt,
             ClosedAt = closedAt,
-            Mode = mode
+            Mode = mode,
+            ExternalTradeId = externalTradeId
         };
     }
 

@@ -18,7 +18,7 @@ builder.Services.AddCors(opts =>
         .AllowAnyMethod()));
 
 builder.Services.AddApplication();
-builder.Services.AddInfrastructure();
+builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 

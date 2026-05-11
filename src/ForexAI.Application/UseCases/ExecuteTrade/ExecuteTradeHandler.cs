@@ -1,6 +1,7 @@
 using ForexAI.Domain.Entities;
 using ForexAI.Domain.Enums;
 using ForexAI.Domain.Interfaces;
+using ForexAI.Domain.ValueObjects;
 using MediatR;
 using Microsoft.Extensions.Logging;
 
@@ -14,15 +15,18 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
 
     private readonly ISignalRepository _signals;
     private readonly ITradePositionRepository _positions;
+    private readonly IBrokerService _broker;
     private readonly ILogger<ExecuteTradeHandler> _logger;
 
     public ExecuteTradeHandler(
         ISignalRepository signals,
         ITradePositionRepository positions,
+        IBrokerService broker,
         ILogger<ExecuteTradeHandler> logger)
     {
         _signals = signals;
         _positions = positions;
+        _broker = broker;
         _logger = logger;
     }
 
@@ -31,7 +35,8 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
         var signal = await _signals.GetByIdAsync(request.SignalId)
             ?? throw new InvalidOperationException($"Signal {request.SignalId} not found");
 
-        var tradeId = $"SIM-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}";
+        var tradePrefix = _broker.IsLive ? "OANDA" : "SIM";
+        var tradeId = $"{tradePrefix}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}";
 
         // First Law: never execute without GO
         if (!request.RiskValidation.IsGo)
@@ -42,6 +47,17 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
             var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, skipReason);
             await _positions.SaveAsync(skipped);
             return skipped;
+        }
+
+        // Fetch live equity from broker when connected, otherwise use command values
+        decimal currentEquity = request.CurrentEquity;
+        decimal peakEquity = request.PeakEquity;
+        if (_broker.IsLive)
+        {
+            var account = await _broker.GetAccountAsync();
+            currentEquity = account.Equity;
+            // Use peak equity from command unless not provided (0 = caller defers to broker)
+            if (peakEquity == 0m) peakEquity = account.Equity;
         }
 
         // Hard limit: max open positions
@@ -56,7 +72,7 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
         }
 
         // Hard limit: max drawdown 10%
-        var drawdown = (request.PeakEquity - request.CurrentEquity) / request.PeakEquity;
+        var drawdown = peakEquity > 0 ? (peakEquity - currentEquity) / peakEquity : 0m;
         if (drawdown >= MaxDrawdownPct)
         {
             var msg = $"System STOP — drawdown {drawdown:P1} >= {MaxDrawdownPct:P0} limit";
@@ -68,7 +84,7 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
 
         // Hard limit: risk per trade max 1%
         var p = request.RiskValidation.ValidatedParameters!;
-        var actualRiskPct = p.RiskAmount / request.CurrentEquity;
+        var actualRiskPct = currentEquity > 0 ? p.RiskAmount / currentEquity : p.RiskAmount;
         if (actualRiskPct > MaxRiskPerTradePct)
         {
             var msg = $"Risk {actualRiskPct:P2} exceeds 1% limit";
@@ -78,26 +94,70 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
             return skipped;
         }
 
-        var position = TradePosition.CreateSimulated(
-            tradeId,
-            signal.RunId,
-            signal.Pair,
-            signal.Signal,
-            p.Entry,
-            p.StopLoss,
-            p.TakeProfit,
-            p.LotSize,
-            p.RiskAmount,
-            p.PotentialProfit,
-            p.RiskRewardRatio);
+        TradePosition position;
+
+        if (_broker.IsLive)
+        {
+            var orderReq = new BrokerOrderRequest(
+                Instrument: signal.Pair,
+                IsBuy: signal.Signal == SignalDirection.BUY,
+                LotSize: p.LotSize,
+                StopLoss: p.StopLoss,
+                TakeProfit: p.TakeProfit);
+
+            var externalId = await _broker.PlaceOrderAsync(orderReq);
+
+            if (externalId == null)
+            {
+                var msg = "OANDA order was cancelled (FOK not filled)";
+                _logger.LogWarning("Trade skipped: {Reason}", msg);
+                var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
+                await _positions.SaveAsync(skipped);
+                return skipped;
+            }
+
+            position = TradePosition.CreateBrokerExecuted(
+                tradeId,
+                signal.RunId,
+                signal.Pair,
+                signal.Signal,
+                p.Entry,
+                p.StopLoss,
+                p.TakeProfit,
+                p.LotSize,
+                p.RiskAmount,
+                p.PotentialProfit,
+                p.RiskRewardRatio,
+                mode: "OANDA_DEMO",
+                externalTradeId: externalId);
+
+            _logger.LogInformation(
+                "Trade OPEN [OANDA_DEMO] {TradeId} (ext:{ExternalId}) — {Direction} {Pair} @ {Entry}, SL {SL}, TP {TP}, lot {Lot}",
+                tradeId, externalId, signal.Signal, signal.Pair,
+                p.Entry, p.StopLoss, p.TakeProfit, p.LotSize);
+        }
+        else
+        {
+            position = TradePosition.CreateSimulated(
+                tradeId,
+                signal.RunId,
+                signal.Pair,
+                signal.Signal,
+                p.Entry,
+                p.StopLoss,
+                p.TakeProfit,
+                p.LotSize,
+                p.RiskAmount,
+                p.PotentialProfit,
+                p.RiskRewardRatio);
+
+            _logger.LogInformation(
+                "Trade OPEN [SIMULATION] {TradeId} — {Direction} {Pair} @ {Entry}, SL {SL}, TP {TP}, lot {Lot}",
+                tradeId, signal.Signal, signal.Pair,
+                p.Entry, p.StopLoss, p.TakeProfit, p.LotSize);
+        }
 
         await _positions.SaveAsync(position);
-
-        _logger.LogInformation(
-            "Trade OPEN [{Mode}] {TradeId} — {Direction} {Pair} @ {Entry}, SL {SL}, TP {TP}, lot {Lot}",
-            request.Mode, tradeId, signal.Signal, signal.Pair,
-            p.Entry, p.StopLoss, p.TakeProfit, p.LotSize);
-
         return position;
     }
 }

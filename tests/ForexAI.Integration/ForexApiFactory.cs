@@ -14,17 +14,26 @@ public class ForexApiFactory : WebApplicationFactory<Program>
 
     static ForexApiFactory()
     {
-        // Services like StubMarketDataService resolve _bmad-output/ relative to CWD.
-        // Set CWD to project root so relative paths work from test runner too.
         var projectRoot = FindProjectRoot();
+
+        // DeferredHostBuilder passes --contentRoot src/ForexAI.API (relative) to Program.Main.
+        // HostApplicationBuilder resolves it against AppContext.BaseDirectory (test binary dir),
+        // producing a non-existent path. PhysicalFileProvider throws if the directory is missing,
+        // so we create it preemptively. ConfigureWebHost.UseContentRoot then corrects the path.
+        var dummyContentRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "src", "ForexAI.API");
+        Directory.CreateDirectory(dummyContentRoot);
+
+        // Set CWD to project root so that ProjectPaths._bmad-output/ resolution works
+        // for StubMarketDataService and BmadSignalAnalyzer when they use relative paths.
         Directory.SetCurrentDirectory(projectRoot);
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
-        // WebApplicationFactory infers content root as <solutionRoot>/ForexAI.API,
-        // but the actual API project lives in src/ForexAI.API. Override to correct path.
+        // Correct the content root: DeferredHostBuilder passed a relative path to Program.Main;
+        // this UseContentRoot call runs via deferred actions during IHostBuilder.Build() and
+        // sets IWebHostEnvironment.ContentRootPath to the real project directory.
         builder.UseContentRoot(Path.Combine(FindProjectRoot(), "src", "ForexAI.API"));
 
         builder.ConfigureServices(services =>

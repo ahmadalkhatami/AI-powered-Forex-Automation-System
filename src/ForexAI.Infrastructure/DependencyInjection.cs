@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using ForexAI.Domain.Interfaces;
+using ForexAI.Infrastructure.Broker.AlphaVantage;
 using ForexAI.Infrastructure.Broker.Oanda;
 using ForexAI.Infrastructure.Persistence.Repositories;
 using ForexAI.Infrastructure.Services;
@@ -14,14 +15,23 @@ public static class DependencyInjection
         this IServiceCollection services, IConfiguration configuration)
     {
         var oanda = configuration.GetSection(OandaSettings.Section).Get<OandaSettings>() ?? new OandaSettings();
+        var av = configuration.GetSection(AlphaVantageSettings.Section).Get<AlphaVantageSettings>() ?? new AlphaVantageSettings();
+
         services.Configure<OandaSettings>(configuration.GetSection(OandaSettings.Section));
+        services.Configure<AlphaVantageSettings>(configuration.GetSection(AlphaVantageSettings.Section));
 
         services.AddScoped<ITradePositionRepository, JsonTradePositionRepository>();
         services.AddScoped<ISignalRepository, JsonSignalRepository>();
         services.AddScoped<ISignalAnalyzer, BmadSignalAnalyzer>();
         services.AddScoped<IRiskEvaluator, RuleBasedRiskEvaluator>();
 
-        if (oanda.EnableLiveData && !string.IsNullOrWhiteSpace(oanda.ApiToken))
+        // Market data: AlphaVantage > OANDA > Stub
+        if (av.EnableLiveData && !string.IsNullOrWhiteSpace(av.ApiKey))
+        {
+            services.AddHttpClient<IMarketDataService, AlphaVantageMarketDataService>(
+                client => client.BaseAddress = new Uri(av.BaseUrl));
+        }
+        else if (oanda.EnableLiveData && !string.IsNullOrWhiteSpace(oanda.ApiToken))
         {
             services.AddHttpClient<IMarketDataService, OandaMarketDataService>(
                 client => ConfigureOandaClient(client, oanda));
@@ -31,6 +41,7 @@ public static class DependencyInjection
             services.AddScoped<IMarketDataService, StubMarketDataService>();
         }
 
+        // Broker execution: OANDA > Null
         if (oanda.EnableExecution && !string.IsNullOrWhiteSpace(oanda.ApiToken))
         {
             services.AddHttpClient<IBrokerService, OandaBrokerService>(

@@ -1,6 +1,6 @@
 # Story 3.3: RiskGatePanel Component
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -22,15 +22,15 @@ so that I understand exactly why a trade is GO, GO_WITH_CAUTION, or NO-GO before
 
 ## Tasks / Subtasks
 
-- [ ] Define `RiskGatePanelData` type in `src/lib/types.ts` (AC: 6)
-- [ ] Create `RiskGatePanel.tsx` (AC: 1–5)
-  - [ ] Collapsible wrapper with Card
-  - [ ] Header: label + decision badge
-  - [ ] Expanded GO state
-  - [ ] Expanded GO_WITH_CAUTION state (GO + caution notes)
-  - [ ] Expanded NO-GO state (red border + no-go reasons)
-  - [ ] Drawdown ProgressBar with dynamic color
-- [ ] Add to main page layout column (AC: 1)
+- [x] Define `RiskGatePanelData` type in `src/lib/types.ts` (AC: 6)
+- [x] Create `RiskGatePanel.tsx` (AC: 1–5)
+  - [x] Collapsible wrapper with Card
+  - [x] Header: label + decision badge
+  - [x] Expanded GO state
+  - [x] Expanded GO_WITH_CAUTION state (GO + caution notes)
+  - [x] Expanded NO-GO state (red border + no-go reasons)
+  - [x] Drawdown ProgressBar with dynamic color
+- [x] Add to main page layout column (AC: 1)
 
 ## Dev Notes
 
@@ -139,6 +139,26 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
+- First build failed: `CardHeader` imported but unused — removed from import, second build passed
+
 ### Completion Notes List
 
+- `RiskGatePanelData` interface added to `src/lib/types.ts`
+- `RiskGatePanel.tsx` wraps `Card` + `Collapsible` — collapsed by default (`open` initialized to `false`)
+- Header trigger shows Tremor `Badge` with color-coded decision: GO (emerald), GO_WITH_CAUTION (amber), NO-GO (red)
+- `Card` gets `border-red-300 dark:border-red-800` when decision is NO-GO per AC: 4
+- Account status: 3-column grid (Equity, Drawdown + ProgressBar, Positions open/max)
+- `drawdownColor()`: emerald <7%, amber 7–9%, red ≥9% per AC: 5
+- NO-GO reasons rendered as red `✗` list; caution notes as amber `⚠` list — mutually exclusive
+- Validated parameters (entry/SL/TP) shown if provided in data
+- Null state: opacity-50 placeholder card
+- Tremor `Badge` used per dev notes (supports color prop natively)
+- `npm run build` passes with zero TypeScript or ESLint errors
+
 ### File List
+
+- frontend/src/lib/types.ts
+- frontend/src/components/dashboard/RiskGatePanel.tsx
+- frontend/src/app/page.tsx
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/3-3-risk-gate-panel.md

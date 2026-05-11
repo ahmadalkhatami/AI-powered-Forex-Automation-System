@@ -1,6 +1,6 @@
 # Story 4.1: AccountHealthBar and PositionCard Components
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -22,20 +22,20 @@ so that I have ambient awareness of my trading state without it interrupting the
 
 ## Tasks / Subtasks
 
-- [ ] Define `AccountHealthData` and `PositionCardData` types in `src/lib/types.ts` (AC: 1, 2)
-- [ ] Create `AccountHealthBar.tsx` (AC: 1)
-  - [ ] Equity display
-  - [ ] Drawdown ProgressBar with dynamic color
-  - [ ] Positions count
-  - [ ] `stopped` state with red warning banner inside card
-- [ ] Create `PositionCard.tsx` (AC: 2)
-  - [ ] Trade ID + Pair + Direction badge header
-  - [ ] Entry price display
-  - [ ] Floating P&L with sign color (positive = emerald, negative = red)
-  - [ ] Distance to SL/TP in pips
-  - [ ] Status-based border color
-- [ ] Create `PositionsList.tsx` wrapper that handles empty state and multiple cards (AC: 4, 5)
-- [ ] Add both to sidebar column in `src/app/page.tsx` (AC: 3)
+- [x] Define `AccountHealthData` and `PositionCardData` types in `src/lib/types.ts` (AC: 1, 2)
+- [x] Create `AccountHealthBar.tsx` (AC: 1)
+  - [x] Equity display
+  - [x] Drawdown ProgressBar with dynamic color
+  - [x] Positions count
+  - [x] `stopped` state with red warning banner inside card
+- [x] Create `PositionCard.tsx` (AC: 2)
+  - [x] Trade ID + Pair + Direction badge header
+  - [x] Entry price display
+  - [x] Floating P&L with sign color (positive = emerald, negative = red)
+  - [x] Distance to SL/TP in pips
+  - [x] Status-based border color
+- [x] Create `PositionsList.tsx` wrapper that handles empty state and multiple cards (AC: 4, 5)
+- [x] Add both to sidebar column in `src/app/page.tsx` (AC: 3)
 
 ## Dev Notes
 
@@ -130,4 +130,19 @@ claude-sonnet-4-6
 
 ### Completion Notes List
 
+- `AccountHealthData` and `PositionCardData` interfaces added to `src/lib/types.ts`
+- `AccountHealthBar.tsx`: 4-state health display (normal/warning/critical/stopped) using `deriveHealthState()`; Tremor ProgressBar with dynamic color; stopped state shows red warning banner
+- `PositionCard.tsx`: border-l-4 variant per status (ACTIVE/CLOSED_WIN/CLOSED_LOSS); floating P&L with sign prefix and pip count; optional SL/TP distance display
+- `PositionsList.tsx`: wrapper with "No open positions" empty state and "Open Positions (N/3)" label
+- Added `AccountHealthBar` and `PositionsList` to sidebar column in `page.tsx`; replaced placeholder text
+- `npm run build` passes with zero TypeScript or ESLint errors
+
 ### File List
+
+- frontend/src/lib/types.ts
+- frontend/src/components/dashboard/AccountHealthBar.tsx
+- frontend/src/components/dashboard/PositionCard.tsx
+- frontend/src/components/dashboard/PositionsList.tsx
+- frontend/src/app/page.tsx
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/4-1-account-health-position-card.md

@@ -1,6 +1,6 @@
 # Story 2.4: TradeParametersCard Component
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -20,14 +20,14 @@ so that I can verify the numbers at a glance before approving a trade.
 
 ## Tasks / Subtasks
 
-- [ ] Define `TradeParametersData` type in `src/lib/types.ts` (AC: 7)
-- [ ] Create `TradeParametersCard.tsx` (AC: 1–6)
-  - [ ] Card layout using shadcn/ui `Card` component
-  - [ ] 2-column label/value grid
-  - [ ] Color-coded value cells
-  - [ ] Pip suffix display
-  - [ ] Null/empty state
-- [ ] Add to main page layout (AC: 1)
+- [x] Define `TradeParametersData` type in `src/lib/types.ts` (AC: 7)
+- [x] Create `TradeParametersCard.tsx` (AC: 1–6)
+  - [x] Card layout using shadcn/ui `Card` component
+  - [x] 2-column label/value grid
+  - [x] Color-coded value cells
+  - [x] Pip suffix display
+  - [x] Null/empty state
+- [x] Add to main page layout (AC: 1)
 
 ## Dev Notes
 
@@ -126,6 +126,24 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
+- No issues encountered — build passed on first attempt
+
 ### Completion Notes List
 
+- `TradeParametersData` interface added to `src/lib/types.ts` (prepended before existing types)
+- `TradeParametersCard.tsx` uses shadcn/ui `Card`/`CardHeader`/`CardContent`/`CardTitle` — `grid-cols-[auto_1fr]` for label/value alignment
+- Color coding: SL value `text-red-600`, TP value `text-emerald-600`, Risk $ `text-amber-600` per AC: 4
+- All numbers use `font-mono font-bold text-2xl` per AC: 3 (non-negotiable per UX spec)
+- Pip counts inline with `text-xs text-muted-foreground`: `(-24 pips)` / `(+45 pips)` per AC: 5
+- R:R uses 3 decimal places: `1:1.875` per dev notes
+- Null state: `opacity-50` card with "No signal — parameters will appear here" per AC: 6
+- Page renders `<TradeParametersCard params={null} />` in main column below SignalHero
+- `npm run build` passes with zero TypeScript or ESLint errors
+
 ### File List
+
+- frontend/src/lib/types.ts
+- frontend/src/components/dashboard/TradeParametersCard.tsx
+- frontend/src/app/page.tsx
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/2-4-trade-parameters-card.md

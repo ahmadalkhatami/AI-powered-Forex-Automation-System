@@ -1,6 +1,6 @@
 # Story 3.2: SignalAnalysisPanel Component
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -23,15 +23,15 @@ so that I can verify AI reasoning before approving without being forced to read 
 
 ## Tasks / Subtasks
 
-- [ ] Define `SignalAnalysisData` type in `src/lib/types.ts` (AC: 7)
-- [ ] Create `SignalAnalysisPanel.tsx` (AC: 1–6)
-  - [ ] Collapsible with collapse-by-default
-  - [ ] Header row with trigger + confidence badge
-  - [ ] Three score rows (Trend, Momentum, Structure)
-  - [ ] Predictor summary row
-  - [ ] Warnings list
-  - [ ] Aria attributes
-- [ ] Add to main page layout column (AC: 1)
+- [x] Define `SignalAnalysisData` type in `src/lib/types.ts` (AC: 7)
+- [x] Create `SignalAnalysisPanel.tsx` (AC: 1–6)
+  - [x] Collapsible with collapse-by-default
+  - [x] Header row with trigger + confidence badge
+  - [x] Three score rows (Trend, Momentum, Structure)
+  - [x] Predictor summary row
+  - [x] Warnings list
+  - [x] Aria attributes
+- [x] Add to main page layout column (AC: 1)
 
 ## Dev Notes
 
@@ -123,6 +123,25 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
+- Build passed first attempt with zero errors
+
 ### Completion Notes List
 
+- `SignalAnalysisData` interface added to `src/lib/types.ts`
+- `SignalAnalysisPanel.tsx` uses shadcn/ui `Collapsible`/`CollapsibleTrigger`/`CollapsibleContent` — collapsed by default (`open` state initialized to `false`)
+- `ScoreRow` helper component: `grid-cols-[80px_1fr_40px]` layout, Tremor `ProgressBar` with `scoreColor()` helper (≥70% emerald, ≥50% amber, else red)
+- `CollapsibleTrigger` handles `aria-expanded` automatically via Radix UI — no manual wiring needed per dev notes
+- Chevron rotates 180° when open using controlled `open` state + conditional `rotate-180` class
+- Predictor row uses same layout as ScoreRow but with 0–100 scale (not 0.0–1.0)
+- Warnings rendered as amber `⚠` list items when `data.warnings.length > 0`
+- Null state: opacity-50 placeholder card
+- Page adds `<SignalAnalysisPanel data={null} />` to main column
+- `npm run build` passes with zero TypeScript or ESLint errors
+
 ### File List
+
+- frontend/src/lib/types.ts
+- frontend/src/components/dashboard/SignalAnalysisPanel.tsx
+- frontend/src/app/page.tsx
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/3-2-signal-analysis-panel.md

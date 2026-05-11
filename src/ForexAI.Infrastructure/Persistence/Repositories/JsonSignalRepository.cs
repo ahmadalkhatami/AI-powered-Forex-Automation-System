@@ -17,6 +17,8 @@ public class JsonSignalRepository : ISignalRepository
         Converters = { new JsonStringEnumConverter() }
     };
 
+    private static readonly SemaphoreSlim _writeLock = new(1, 1);
+
     public JsonSignalRepository()
     {
         _filePath = ResolveDefaultPath();
@@ -27,12 +29,8 @@ public class JsonSignalRepository : ISignalRepository
         _filePath = filePath;
     }
 
-    private static string ResolveDefaultPath()
-    {
-        var current = Directory.GetCurrentDirectory();
-        return Path.GetFullPath(
-            Path.Combine(current, "_bmad-output/implementation-artifacts/signal-history.json"));
-    }
+    private static string ResolveDefaultPath() =>
+        Path.Combine(ProjectPaths.ImplementationArtifactsDir, "signal-history.json");
 
     private async Task<List<TradeSignalDto>> LoadAllAsync()
     {
@@ -85,8 +83,16 @@ public class JsonSignalRepository : ISignalRepository
 
     public async Task SaveAsync(TradeSignal signal)
     {
-        var all = await LoadAllAsync();
-        all.Add(DtoMapper.ToDto(signal));
-        await SaveAllAsync(all);
+        await _writeLock.WaitAsync();
+        try
+        {
+            var all = await LoadAllAsync();
+            all.Add(DtoMapper.ToDto(signal));
+            await SaveAllAsync(all);
+        }
+        finally
+        {
+            _writeLock.Release();
+        }
     }
 }

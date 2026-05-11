@@ -27,12 +27,8 @@ public class JsonTradePositionRepository : ITradePositionRepository
         _filePath = filePath;
     }
 
-    private static string ResolveDefaultPath()
-    {
-        var current = Directory.GetCurrentDirectory();
-        return Path.GetFullPath(
-            Path.Combine(current, "_bmad-output/implementation-artifacts/execution-log.json"));
-    }
+    private static string ResolveDefaultPath() =>
+        Path.Combine(ProjectPaths.ImplementationArtifactsDir, "execution-log.json");
 
     private async Task<List<TradePositionDto>> LoadAllAsync()
     {
@@ -117,6 +113,12 @@ public class JsonTradePositionRepository : ITradePositionRepository
             .Select(DtoMapper.ToDomain)
             .ToList()
             .AsReadOnly();
+    }
+
+    public async Task<IReadOnlyList<TradePosition>> GetAllAsync()
+    {
+        var all = await LoadAllAsync();
+        return all.Select(DtoMapper.ToDomain).ToList().AsReadOnly();
     }
 
     public async Task SaveAsync(TradePosition position)

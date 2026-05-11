@@ -1,6 +1,6 @@
 # Story 2.2: Layout Shell (ModeBanner + Header)
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -31,23 +31,23 @@ so that I never mistake the mode I'm operating in.
 
 ## Tasks / Subtasks
 
-- [ ] Install `next-themes` for dark mode (AC: 3)
-  - [ ] `npm install next-themes`
-- [ ] Create `ThemeProvider` client wrapper (AC: 3)
-  - [ ] `src/components/layout/ThemeProvider.tsx` — wraps `next-themes` Provider
-- [ ] Create `ModeBanner` (AC: 1)
-  - [ ] Props: `mode: 'simulation' | 'live'`
-  - [ ] Two variant styles
-  - [ ] `role="alert"`
-- [ ] Create `Header` (AC: 2)
-  - [ ] Pair + timeframe display (hardcoded "EUR/USD · M15" for now)
-  - [ ] History link using Next.js `<Link>`
-  - [ ] Dark mode toggle using `useTheme()` from next-themes
-- [ ] Update root layout (AC: 3)
-  - [ ] Add ThemeProvider, ModeBanner, Header
-  - [ ] Add `suppressHydrationWarning` on `<html>` (required by next-themes)
-- [ ] Create page layout grid (AC: 4)
-  - [ ] `src/app/page.tsx` with 2-column responsive grid
+- [x] Install `next-themes` for dark mode (AC: 3)
+  - [x] `npm install next-themes`
+- [x] Create `ThemeProvider` client wrapper (AC: 3)
+  - [x] `src/components/layout/ThemeProvider.tsx` — wraps `next-themes` Provider
+- [x] Create `ModeBanner` (AC: 1)
+  - [x] Props: `mode: 'simulation' | 'live'`
+  - [x] Two variant styles
+  - [x] `role="alert"`
+- [x] Create `Header` (AC: 2)
+  - [x] Pair + timeframe display (hardcoded "EUR/USD · M15" for now)
+  - [x] History link using Next.js `<Link>`
+  - [x] Dark mode toggle using `useTheme()` from next-themes
+- [x] Update root layout (AC: 3)
+  - [x] Add ThemeProvider, ModeBanner, Header
+  - [x] Add `suppressHydrationWarning` on `<html>` (required by next-themes)
+- [x] Create page layout grid (AC: 4)
+  - [x] `src/app/page.tsx` with 2-column responsive grid
 
 ## Dev Notes
 
@@ -160,6 +160,25 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
+- No issues encountered — next-themes installed cleanly, build passed on first attempt
+
 ### Completion Notes List
 
+- `next-themes` 0.4.x installed; ThemeProvider wraps entire layout with `attribute="class"` for Tailwind dark: variant support
+- `ModeBanner`: full-width sticky top, `role="alert"`, simulation (amber-400/amber-950) and live (red-700/white) variants, not dismissable
+- `Header`: EUR/USD · M15 title, History ↗ link via Next.js Link, dark mode toggle with Sun/Moon icons from lucide-react
+- Root layout updated: ThemeProvider → ModeBanner → Header → main with max-w-7xl container
+- `page.tsx` replaced default Next.js boilerplate with 2-column responsive grid (1 col below xl, 65/35 split at xl+)
+- `suppressHydrationWarning` was already on `<html>` from Story 2.1 — no change needed
+- `npm run build` passes with zero TypeScript or ESLint errors
+
 ### File List
+
+- frontend/src/components/layout/ThemeProvider.tsx
+- frontend/src/components/layout/ModeBanner.tsx
+- frontend/src/components/layout/Header.tsx
+- frontend/src/app/layout.tsx
+- frontend/src/app/page.tsx
+- frontend/package.json
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/2-2-layout-shell-modebanner-header.md

@@ -65,6 +65,7 @@ Persistence/Dtos/
 Persistence/Repositories/
  JsonSignalRepository.cs
  JsonTradePositionRepository.cs
+ProjectPaths.cs
 Services/
  BmadSignalAnalyzer.cs
  RuleBasedRiskEvaluator.cs

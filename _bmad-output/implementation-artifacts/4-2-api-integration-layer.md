@@ -1,6 +1,6 @@
 # Story 4.2: API Integration Layer
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -25,19 +25,19 @@ so that all dashboard components display real pipeline data instead of hardcoded
 
 ## Tasks / Subtasks
 
-- [ ] Complete `src/lib/types.ts` with all response shapes (AC: 1)
-- [ ] Create `src/lib/api.ts` with 4 functions (AC: 2, 3)
-  - [ ] Base URL from env var
-  - [ ] Error handling: throw typed errors with HTTP status
-- [ ] Create `src/lib/env.ts` with `NEXT_PUBLIC_API_URL` export
-- [ ] Update `src/app/page.tsx` with data fetching logic (AC: 4)
-  - [ ] `useState` for signal, riskValidation, positions, accountHealth
-  - [ ] `useEffect` for initial load (analyzeSignal + getPositionStatus)
-  - [ ] Pass real data to all child components
-- [ ] Wire APPROVE confirm → executeTrade → position card appears (AC: 5)
-- [ ] Wire REJECT confirm → dismiss from state (AC: 6)
-- [ ] Wire "Trigger New Analysis" → full pipeline (AC: 7)
-- [ ] Wire toast notifications (AC: 8)
+- [x] Complete `src/lib/types.ts` with all response shapes (AC: 1)
+- [x] Create `src/lib/api.ts` with 4 functions (AC: 2, 3)
+  - [x] Base URL from env var
+  - [x] Error handling: throw typed errors with HTTP status
+- [x] Create `src/lib/env.ts` with `NEXT_PUBLIC_API_URL` export
+- [x] Update `src/app/page.tsx` with data fetching logic (AC: 4)
+  - [x] `useState` for signal, riskValidation, positions, accountHealth
+  - [x] `useEffect` for initial load (analyzeSignal + getPositionStatus)
+  - [x] Pass real data to all child components
+- [x] Wire APPROVE confirm → executeTrade → position card appears (AC: 5)
+- [x] Wire REJECT confirm → dismiss from state (AC: 6)
+- [x] Wire "Trigger New Analysis" → full pipeline (AC: 7)
+- [x] Wire toast notifications (AC: 8)
 
 ## Dev Notes
 
@@ -195,4 +195,27 @@ claude-sonnet-4-6
 
 ### Completion Notes List
 
+- API response types added to `types.ts`: `MarketSnapshotResponse`, `TrendAnalysisResponse`, `MomentumAnalysisResponse`, `StructureAnalysisResponse`, `TradeParametersResponse`, `TradeSignalResponse`, `RiskValidationResponse`, `TradePositionResponse` + request types `EvaluateRiskRequest`, `ExecuteTradeRequest`
+- `src/lib/env.ts` — exports `API_URL` from `NEXT_PUBLIC_API_URL` env var (default: `http://localhost:5000`)
+- `src/lib/api.ts` — `fetchApi` helper + 4 typed functions: `analyzeSignal`, `evaluateRisk`, `executeTrade`, `getPositionStatus`; `getPositionStatus` handles 204 → null
+- `frontend/.env.local` + `.env.example` created with `NEXT_PUBLIC_API_URL=http://localhost:5000`
+- `layout.tsx` — `Toaster` added inside `ThemeProvider`
+- `page.tsx` fully rewritten as `'use client'` with `PageState` state machine (`loading/no-signal/signal-ready/processing/monitoring/error`)
+- Data adapters: `mapToSignalHeroData`, `mapToSignalAnalysisData`, `mapToRiskGatePanelData`, `mapToPositionCard`, `mapTradeParameters`
+- `runFullPipeline`: parallel `analyzeSignal` + `getPositionStatus` on load; then `evaluateRisk`; wrapped in `useCallback` to avoid stale closure in `useEffect`
+- "Trigger New Analysis" button wired to `runFullPipeline`; disabled during loading/processing
+- APPROVE → `executeTrade` → position pushed to state; REJECT → signal + risk cleared from state
+- Toast on: position opened, execute error, connection error, signal dismissed
+- Fix: `SignalHero mode` type is `'default' | 'monitoring'` (not `'simulation'`); corrected during build
+
 ### File List
+
+- frontend/src/lib/types.ts
+- frontend/src/lib/env.ts
+- frontend/src/lib/api.ts
+- frontend/.env.local
+- frontend/.env.example
+- frontend/src/app/layout.tsx
+- frontend/src/app/page.tsx
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/4-2-api-integration-layer.md

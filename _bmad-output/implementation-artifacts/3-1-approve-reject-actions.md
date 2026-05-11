@@ -1,6 +1,6 @@
 # Story 3.1: ApproveRejectActions Component
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -25,16 +25,16 @@ so that I can execute or dismiss a trade signal safely without accidental clicks
 
 ## Tasks / Subtasks
 
-- [ ] Define `ActionState` type (AC: 2)
-- [ ] Create `ApproveRejectActions.tsx` (AC: 1–7)
-  - [ ] Derive button visual state from `ActionState` prop
-  - [ ] APPROVE button with AlertDialog
-  - [ ] REJECT button with AlertDialog
-  - [ ] `aria-disabled` on APPROVE when NO-GO (not HTML `disabled`)
-  - [ ] Spinner in APPROVE when processing
-  - [ ] Caution text below APPROVE when caution state
-  - [ ] `onApprove` / `onReject` callback props
-- [ ] Add to main page layout (AC: 1)
+- [x] Define `ActionState` type (AC: 2)
+- [x] Create `ApproveRejectActions.tsx` (AC: 1–7)
+  - [x] Derive button visual state from `ActionState` prop
+  - [x] APPROVE button with AlertDialog
+  - [x] REJECT button with AlertDialog
+  - [x] `aria-disabled` on APPROVE when NO-GO (not HTML `disabled`)
+  - [x] Spinner in APPROVE when processing
+  - [x] Caution text below APPROVE when caution state
+  - [x] `onApprove` / `onReject` callback props
+- [x] Add to main page layout (AC: 1)
 
 ## Dev Notes
 
@@ -147,6 +147,26 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
+- `SignalHeroData` extended with `parameters?: TradeParametersData` — needed for dialog text population per dev notes (`signal.parameters?.entry`)
+- `AlertDialogDescription asChild` used for APPROVE dialog to allow block-level children (div with multiple paragraphs)
+- Build passed on first attempt
+
 ### Completion Notes List
 
+- `ActionState` type added to `src/lib/types.ts`; `SignalHeroData` extended with `parameters?: TradeParametersData`
+- `ApproveRejectActions.tsx` implements all 4 states: enabled-go (emerald), enabled-caution (amber + caution notes), disabled-nogo (opacity-50 + aria-disabled, no HTML disabled), processing (Loader2 spinner)
+- APPROVE always left, REJECT always right — flex layout, never reversed per AC: 5
+- `aria-disabled={true}` + `pointer-events-none` used for NO-GO state — not HTML `disabled` attribute per AC spec
+- Both dialogs use `onEscapeKeyDown={(e) => e.preventDefault()}` to block Escape dismiss per AC: 6
+- Callbacks `onApprove`/`onReject` fire only after AlertDialog confirmation (AlertDialogAction onClick) per AC: 7
+- REJECT dialog: "Keep Signal" cancel, "Reject" confirm per AC: 4
+- Mock signal added to `page.tsx` to demonstrate `enabled-go` state
+- `npm run build` passes with zero TypeScript or ESLint errors
+
 ### File List
+
+- frontend/src/lib/types.ts
+- frontend/src/components/dashboard/ApproveRejectActions.tsx
+- frontend/src/app/page.tsx
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/3-1-approve-reject-actions.md

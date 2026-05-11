@@ -18,12 +18,8 @@ public class StubMarketDataService : IMarketDataService
         _signalOutputPath = signalOutputPath;
     }
 
-    private static string ResolveDefaultPath()
-    {
-        var current = Directory.GetCurrentDirectory();
-        return Path.GetFullPath(
-            Path.Combine(current, "_bmad-output/planning-artifacts/signal-output.json"));
-    }
+    private static string ResolveDefaultPath() =>
+        Path.Combine(ProjectPaths.PlanningArtifactsDir, "signal-output.json");
 
     public async Task<MarketSnapshot> GetSnapshotAsync(string pair, string timeframe)
     {

@@ -67,6 +67,9 @@ UseCases/EvaluateRisk/
 UseCases/ExecuteTrade/
  ExecuteTradeCommand.cs
  ExecuteTradeHandler.cs
+UseCases/GetAllPositions/
+ GetAllPositionsHandler.cs
+ GetAllPositionsQuery.cs
 UseCases/GetPositionStatus/
  GetPositionStatusHandler.cs
  GetPositionStatusQuery.cs

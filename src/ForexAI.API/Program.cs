@@ -39,6 +39,6 @@ app.UseExceptionHandler(appBuilder => appBuilder.Run(async ctx =>
 
 app.UseCors();
 app.MapControllers();
-app.Run();
+app.Run("http://localhost:8080");
 
 public partial class Program { }

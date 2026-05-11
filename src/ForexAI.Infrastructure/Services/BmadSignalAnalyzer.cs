@@ -13,10 +13,8 @@ public class BmadSignalAnalyzer : ISignalAnalyzer
 
     public BmadSignalAnalyzer()
     {
-        var current = Directory.GetCurrentDirectory();
-        var artifacts = Path.Combine(current, "_bmad-output/planning-artifacts");
-        _signalOutputPath = Path.GetFullPath(Path.Combine(artifacts, "signal-output.json"));
-        _riskDecisionPath = Path.GetFullPath(Path.Combine(artifacts, "risk-decision.json"));
+        _signalOutputPath = Path.Combine(ProjectPaths.PlanningArtifactsDir, "signal-output.json");
+        _riskDecisionPath = Path.Combine(ProjectPaths.PlanningArtifactsDir, "risk-decision.json");
     }
 
     public BmadSignalAnalyzer(string signalOutputPath, string riskDecisionPath)

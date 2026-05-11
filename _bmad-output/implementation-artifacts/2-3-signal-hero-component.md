@@ -1,6 +1,6 @@
 # Story 2.3: SignalHero Component
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -25,19 +25,19 @@ so that I can assess whether to approve or reject a trade in under 2 seconds.
 
 ## Tasks / Subtasks
 
-- [ ] Define `SignalHeroData` type in `src/lib/types.ts` (AC: 6)
-  - [ ] Fields: `id, pair, timeframe, signal, decision, confidenceScore, pair, timestamp, blockReason?, cautionNotes?`
-- [ ] Create `SignalHero.tsx` (AC: 1–5)
-  - [ ] Props interface: `{ signal: SignalHeroData | null; mode: 'monitoring' | 'default'; onTriggerAnalysis?: () => void }`
-  - [ ] State logic: derive `state` from `signal` and `mode` props
-  - [ ] `active-go` render
-  - [ ] `active-nogo` render with block reason badge
-  - [ ] `active-caution` render with amber treatment
-  - [ ] `no-signal` render with trigger button
-  - [ ] `monitoring` render
-  - [ ] `role="status"` + `aria-live="polite"`
-- [ ] Add to main page layout column (AC: 1)
-- [ ] Verify TypeScript (AC: 7)
+- [x] Define `SignalHeroData` type in `src/lib/types.ts` (AC: 6)
+  - [x] Fields: `id, pair, timeframe, signal, decision, confidenceScore, pair, timestamp, blockReason?, cautionNotes?`
+- [x] Create `SignalHero.tsx` (AC: 1–5)
+  - [x] Props interface: `{ signal: SignalHeroData | null; mode: 'monitoring' | 'default'; onTriggerAnalysis?: () => void }`
+  - [x] State logic: derive `state` from `signal` and `mode` props
+  - [x] `active-go` render
+  - [x] `active-nogo` render with block reason badge
+  - [x] `active-caution` render with amber treatment
+  - [x] `no-signal` render with trigger button
+  - [x] `monitoring` render
+  - [x] `role="status"` + `aria-live="polite"`
+- [x] Add to main page layout column (AC: 1)
+- [x] Verify TypeScript (AC: 7)
 
 ## Dev Notes
 
@@ -144,6 +144,24 @@ claude-sonnet-4-6
 
 ### Debug Log References
 
+- No issues encountered — build passed on first attempt with zero TypeScript errors
+
 ### Completion Notes List
 
+- `src/lib/types.ts` created with `SignalDirection`, `DecisionType`, and `SignalHeroData` interface
+- `SignalHero.tsx` implements all 5 states: active-go (emerald), active-nogo (red + Badge), active-caution (amber + AlertTriangle icon + cautionNotes list), no-signal (ghost button), monitoring (neutral text)
+- `deriveState()` pure function: monitoring mode overrides signal state; null signal → no-signal; decision drives active variant
+- Tremor `ProgressBar` used for confidence score display (value 0–100, color matches state)
+- Timestamp formatted with `Intl.DateTimeFormat` for id-ID locale, Asia/Jakarta timezone
+- `role="status"` + `aria-live="polite"` on root container per AC: 4
+- `onTriggerAnalysis` callback wired to ghost button in no-signal state per AC: 5
+- Page renders `<SignalHero signal={null} mode="default" />` to show no-signal state as default
+- `npm run build` passes with zero TypeScript or ESLint errors
+
 ### File List
+
+- frontend/src/lib/types.ts
+- frontend/src/components/dashboard/SignalHero.tsx
+- frontend/src/app/page.tsx
+- _bmad-output/implementation-artifacts/sprint-status.yaml
+- _bmad-output/implementation-artifacts/2-3-signal-hero-component.md

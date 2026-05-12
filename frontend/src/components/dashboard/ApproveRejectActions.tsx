@@ -35,7 +35,6 @@ export function ApproveRejectActions({
   const [rejectOpen, setRejectOpen] = useState(false)
 
   const isProcessing = state === 'processing'
-  const isNoGo = state === 'disabled-nogo'
 
   return (
     <div className="flex flex-col gap-2">

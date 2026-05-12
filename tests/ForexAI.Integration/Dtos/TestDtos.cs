@@ -23,4 +23,4 @@ record TradeParametersDto(
     decimal PotentialProfit,
     decimal RiskRewardRatio);
 
-record TradePositionDto(string TradeId, string Status, string Pair);
+record TradePositionDto(string TradeId, string Status, string Pair, decimal Entry);

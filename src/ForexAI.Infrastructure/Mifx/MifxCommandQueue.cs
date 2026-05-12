@@ -4,10 +4,12 @@ namespace ForexAI.Infrastructure.Mifx;
 
 public record MifxOrderCommand(
     string CommandId,
+    string Action,      // "OPEN" | "CLOSE"
     string Direction,   // "BUY" | "SELL"
     decimal Lots,
     decimal StopLoss,
-    decimal TakeProfit
+    decimal TakeProfit,
+    long? Ticket = null
 );
 
 public record MifxOrderResult(
@@ -24,8 +26,7 @@ public record MifxOrderResult(
 /// </summary>
 public class MifxCommandQueue
 {
-    // Hanya satu pending command pada satu waktu (atomic swap)
-    private MifxOrderCommand? _pending;
+    private readonly ConcurrentQueue<MifxOrderCommand> _pending = new();
 
     private readonly ConcurrentDictionary<string, TaskCompletionSource<MifxOrderResult>>
         _awaiting = new();
@@ -39,7 +40,7 @@ public class MifxCommandQueue
             TaskCreationOptions.RunContinuationsAsynchronously);
 
         _awaiting[command.CommandId] = tcs;
-        Interlocked.Exchange(ref _pending, command);
+        _pending.Enqueue(command);
 
         // Auto-cancel jika EA tidak merespons dalam batas waktu
         _ = Task.Delay(TimeSpan.FromSeconds(timeoutSeconds)).ContinueWith(_ =>
@@ -55,7 +56,7 @@ public class MifxCommandQueue
     /// EA memanggil endpoint GET /api/mifx/command → dequeue command.
     /// </summary>
     public MifxOrderCommand? Dequeue()
-        => Interlocked.Exchange(ref _pending, null);
+        => _pending.TryDequeue(out var command) ? command : null;
 
     /// <summary>
     /// EA memanggil endpoint POST /api/mifx/order-result → selesaikan task.

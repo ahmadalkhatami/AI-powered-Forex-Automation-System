@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { RefreshCw, Cpu } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -164,6 +164,7 @@ export default function DashboardPage() {
   const [positions, setPositions] = useState<TradePositionResponse[]>([])
   const [candles, setCandles] = useState<CandleBar[]>([])
   const [mifxStatus, setMifxStatus] = useState<MifxStatusResponse | null>(null)
+  const livePollInFlight = useRef(false)
   const [accountHealth, setAccountHealth] = useState<AccountHealthData>({
     equity: INITIAL_EQUITY,
     peakEquity: INITIAL_EQUITY,
@@ -258,26 +259,19 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Poll MIFX live price + posisi + account health setiap 2 detik
+  // Poll MIFX live price + posisi + account health setiap 1 detik.
   useEffect(() => {
     const poll = async () => {
-      // MIFX status (live price, balance, equity)
+      if (livePollInFlight.current) return
+      livePollInFlight.current = true
       try {
-        const s = await getMifxStatus()
+        const [s, all, health] = await Promise.all([
+          getMifxStatus(),
+          getAllPositions(),
+          getAccountHealth(),
+        ])
         setMifxStatus(s)
-      } catch {
-        setMifxStatus(null)
-      }
-      // Posisi terbaru (FloatingPnl di-sync dari EA setiap tick)
-      try {
-        const all = await getAllPositions()
         setPositions(all)
-      } catch {
-        // keep previous value
-      }
-      // Account health (equity termasuk unrealized PnL dari MIFX)
-      try {
-        const health = await getAccountHealth()
         setAccountHealth({
           equity: health.equity,
           peakEquity: health.peakEquity,
@@ -297,10 +291,12 @@ export default function DashboardPage() {
         })
       } catch {
         // keep previous value
+      } finally {
+        livePollInFlight.current = false
       }
     }
     poll()
-    const id = setInterval(poll, 2000)
+    const id = setInterval(poll, 1000)
     return () => clearInterval(id)
   }, [])
 
@@ -370,14 +366,16 @@ export default function DashboardPage() {
 
   const handleClosePosition = async (tradeId: string, outcome: 'WIN' | 'LOSS', exitPrice: number) => {
     try {
-      await closePosition(tradeId, outcome, exitPrice)
-      await Promise.all([refreshPositions(), refreshAccountHealth()])
+      const closed = await closePosition(tradeId, outcome, exitPrice)
+      setPositions((prev) => prev.map((p) => p.tradeId === closed.tradeId ? closed : p))
+      void Promise.all([refreshPositions(), refreshAccountHealth()])
       toast({
         title: outcome === 'WIN' ? '✅ Trade closed — WIN' : '❌ Trade closed — LOSS',
         description: `Exit @ ${exitPrice.toFixed(5)}`,
       })
-    } catch {
-      toast({ title: 'Close failed', variant: 'destructive' })
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : 'Close order could not be completed'
+      toast({ title: 'Close failed', description: detail, variant: 'destructive' })
     }
   }
 

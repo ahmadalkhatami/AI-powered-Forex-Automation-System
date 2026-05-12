@@ -1,5 +1,6 @@
 using ForexAI.Domain.Interfaces;
 using ForexAI.Domain.ValueObjects;
+using ForexAI.Domain.Entities;
 using Microsoft.Extensions.Logging;
 
 namespace ForexAI.Infrastructure.Mifx;
@@ -41,6 +42,7 @@ public class MifxBrokerService : IBrokerService
 
         var command = new MifxOrderCommand(
             CommandId:  Guid.NewGuid().ToString("N")[..8].ToUpperInvariant(),
+            Action:     "OPEN",
             Direction:  request.IsBuy ? "BUY" : "SELL",
             Lots:       request.LotSize,
             StopLoss:   request.StopLoss,
@@ -66,5 +68,49 @@ public class MifxBrokerService : IBrokerService
             "Order GAGAL — status={Status} retcode={Retcode}",
             result.Status, result.Retcode);
         return null;
+    }
+
+    public async Task<BrokerExecutionResult> ClosePositionAsync(
+        TradePosition position,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_feed.IsConnected)
+            return new BrokerExecutionResult(false, null, "MIFX EA tidak terkoneksi", 0m);
+
+        var externalId = position.ExternalTradeId ?? "";
+        if (!externalId.StartsWith("MIFX-", StringComparison.OrdinalIgnoreCase) ||
+            !long.TryParse(externalId["MIFX-".Length..], out var ticket))
+        {
+            return new BrokerExecutionResult(false, null, $"Invalid MIFX ticket: {externalId}", 0m);
+        }
+
+        var command = new MifxOrderCommand(
+            CommandId:  Guid.NewGuid().ToString("N")[..8].ToUpperInvariant(),
+            Action:     "CLOSE",
+            Direction:  position.Direction.ToString(),
+            Lots:       position.LotSize,
+            StopLoss:   0m,
+            TakeProfit: 0m,
+            Ticket:     ticket);
+
+        _logger.LogInformation(
+            "Mengirim perintah CLOSE ke MT5 EA: tradeId={TradeId} ticket={Ticket} lot={Lot} | commandId={Id}",
+            position.TradeId, ticket, position.LotSize, command.CommandId);
+
+        var result = await _queue.EnqueueAsync(command, timeoutSeconds: 8);
+
+        if (result.Status is "CLOSED" or "FILLED" || result.Retcode == -21)
+        {
+            _logger.LogInformation(
+                "Position CLOSED di MIFX — ticket={Ticket} price={Price}",
+                ticket, result.Price);
+            return new BrokerExecutionResult(true, externalId, null, result.Price);
+        }
+
+        _logger.LogWarning(
+            "Close order GAGAL — ticket={Ticket} status={Status} retcode={Retcode}",
+            ticket, result.Status, result.Retcode);
+
+        return new BrokerExecutionResult(false, externalId, result.Status, result.Price);
     }
 }

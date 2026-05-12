@@ -11,8 +11,8 @@
 //|  4. Drag EA ke chart EURUSD.m,M15                               |
 //+------------------------------------------------------------------+
 #property copyright "ForexAI"
-#property version   "1.18"
-#property description "ForexAI price bridge + MA/RSI/ATR/ADX/SR indicators + order executor + live position sync"
+#property version   "1.19"
+#property description "ForexAI price bridge + indicators + order executor + close-order sync"
 
 //--- Input parameters
 input string   BackendUrl  = "http://127.0.0.1:5033";  // URL backend ForexAI
@@ -74,7 +74,7 @@ int OnInit()
       return INIT_FAILED;
    }
 
-   Print("[ForexAI] Bridge aktif v1.18 — pair: ", TradePair, " | backend: ", BackendUrl,
+   Print("[ForexAI] Bridge aktif v1.19 — pair: ", TradePair, " | backend: ", BackendUrl,
          " | balance: ", AccountInfoDouble(ACCOUNT_BALANCE),
          " | equity: ", AccountInfoDouble(ACCOUNT_EQUITY));
 
@@ -105,8 +105,8 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTimer()
 {
-   SendLatestTick();
    CheckForCommand();
+   SendLatestTick();
 }
 
 //+------------------------------------------------------------------+
@@ -208,12 +208,36 @@ void CheckForCommand()
    {
       string json = CharArrayToString(resp);
       Print("[ForexAI] Perintah diterima: ", json);
-      ExecuteOrderFromJson(json);
+      DispatchCommandFromJson(json);
    }
 }
 
 //+------------------------------------------------------------------+
-//| Parse JSON perintah dan eksekusi order di MT5                    |
+//| Route command OPEN/CLOSE dari backend                            |
+//+------------------------------------------------------------------+
+void DispatchCommandFromJson(string json)
+{
+   string commandId = JsonGetString(json, "commandId");
+   string action    = JsonGetString(json, "action");
+
+   if(action == "" || action == "OPEN")
+   {
+      ExecuteOrderFromJson(json);
+      return;
+   }
+
+   if(action == "CLOSE")
+   {
+      ClosePositionFromJson(json);
+      return;
+   }
+
+   Print("[ForexAI] Action tidak dikenal: ", action, " | ", json);
+   ReportOrderResult(commandId, "FAILED", "", 0.0, -10);
+}
+
+//+------------------------------------------------------------------+
+//| Parse JSON perintah dan eksekusi order open di MT5               |
 //+------------------------------------------------------------------+
 void ExecuteOrderFromJson(string json)
 {
@@ -260,12 +284,72 @@ void ExecuteOrderFromJson(string json)
    bool ok = OrderSend(req, res);
 
    string status  = ok ? "FILLED" : "FAILED";
-   string orderId = ok ? IntegerToString((int)res.order) : "";
+   string orderId = ok ? IntegerToString((long)res.order) : "";
 
    Print("[ForexAI] Order ", status, " | code=", res.retcode,
          " | orderId=", orderId, " | price=", res.price);
 
    ReportOrderResult(commandId, status, orderId, res.price, res.retcode);
+}
+
+//+------------------------------------------------------------------+
+//| Parse JSON perintah dan close posisi by ticket                   |
+//+------------------------------------------------------------------+
+void ClosePositionFromJson(string json)
+{
+   string commandId = JsonGetString(json, "commandId");
+   long   ticketRaw = JsonGetLong(json, "ticket");
+
+   if(commandId == "" || ticketRaw <= 0)
+   {
+      Print("[ForexAI] Perintah CLOSE tidak valid: ", json);
+      ReportOrderResult(commandId, "FAILED", "", 0.0, -20);
+      return;
+   }
+
+   ulong ticket = (ulong)ticketRaw;
+   if(!PositionSelectByTicket(ticket))
+   {
+      Print("[ForexAI] Ticket tidak ditemukan untuk CLOSE: ", ticketRaw);
+      ReportOrderResult(commandId, "FAILED", IntegerToString(ticketRaw), 0.0, -21);
+      return;
+   }
+
+   string symbol  = PositionGetString(POSITION_SYMBOL);
+   int    posType = (int)PositionGetInteger(POSITION_TYPE);
+   double volume  = PositionGetDouble(POSITION_VOLUME);
+   bool   wasBuy  = (posType == POSITION_TYPE_BUY);
+
+   int fillFlags = (int)SymbolInfoInteger(symbol, SYMBOL_FILLING_MODE);
+   ENUM_ORDER_TYPE_FILLING fillMode;
+   if     ((fillFlags & 1) != 0) fillMode = ORDER_FILLING_FOK;
+   else if((fillFlags & 2) != 0) fillMode = ORDER_FILLING_IOC;
+   else                          fillMode = ORDER_FILLING_RETURN;
+
+   MqlTradeRequest req = {};
+   MqlTradeResult  res = {};
+
+   req.action       = TRADE_ACTION_DEAL;
+   req.position     = ticket;
+   req.symbol       = symbol;
+   req.volume       = volume;
+   req.type         = wasBuy ? ORDER_TYPE_SELL : ORDER_TYPE_BUY;
+   req.price        = wasBuy
+                      ? SymbolInfoDouble(symbol, SYMBOL_BID)
+                      : SymbolInfoDouble(symbol, SYMBOL_ASK);
+   req.deviation    = 20;
+   req.magic        = MagicNumber;
+   req.comment      = "ForexAI close";
+   req.type_filling = fillMode;
+
+   bool ok = OrderSend(req, res);
+   string status = ok ? "CLOSED" : "FAILED";
+   double price  = (res.price > 0.0) ? res.price : req.price;
+
+   Print("[ForexAI] Close ", status, " | ticket=", ticketRaw,
+         " | code=", res.retcode, " | price=", price);
+
+   ReportOrderResult(commandId, status, IntegerToString(ticketRaw), price, res.retcode);
 }
 
 //+------------------------------------------------------------------+
@@ -334,9 +418,9 @@ string BuildPositionsJson()
       first = false;
 
       result += StringFormat(
-         "{\"ticket\":%d,\"type\":\"%s\",\"symbol\":\"%s\",\"lots\":%.2f,"
+         "{\"ticket\":%s,\"type\":\"%s\",\"symbol\":\"%s\",\"lots\":%.2f,"
          "\"openPrice\":%.5f,\"profit\":%.2f,\"pips\":%d}",
-         (int)ticket,
+         IntegerToString((long)ticket),
          (posType == 0) ? "BUY" : "SELL",
          posSymbol, posLots, posOpen, posProfit, pips);
    }
@@ -376,4 +460,23 @@ double JsonGetDouble(string json, string key)
       end++;
    }
    return StringToDouble(StringSubstr(json, pos, end - pos));
+}
+
+//+------------------------------------------------------------------+
+//| Helper: ambil long dari JSON sederhana                           |
+//+------------------------------------------------------------------+
+long JsonGetLong(string json, string key)
+{
+   string search = "\"" + key + "\":";
+   int pos = StringFind(json, search);
+   if(pos < 0) return 0;
+   pos += StringLen(search);
+   int end = pos;
+   while(end < StringLen(json))
+   {
+      ushort c = StringGetCharacter(json, end);
+      if(!(c >= '0' && c <= '9')) break;
+      end++;
+   }
+   return (long)StringToInteger(StringSubstr(json, pos, end - pos));
 }

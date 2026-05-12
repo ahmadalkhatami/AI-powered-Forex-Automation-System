@@ -151,6 +151,9 @@ export interface MarketSnapshotResponse {
   resistanceZone: string
   session: string
   capturedAt: string
+  atR14: number            // ATR(14) M15 dalam satuan harga (EA v1.16+)
+  adX14: number            // ADX(14) M15 trend strength 0-100 (EA v1.17+)
+  regime: string           // "Trending" | "Ranging" | "Volatile" | "Transitional" | "Unknown"
 }
 
 export interface TrendAnalysisResponse {

@@ -43,8 +43,11 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         // ── 4. Signal direction ─────────────────────────────────────────────
         var signal = DetermineSignal(bullishBias, momentum, pctFromSupport);
 
+        // ── 4b. Regime filter — override sinyal jika market sideway ────────
+        signal = ApplyRegimeFilter(signal, snap, structure);
+
         // ── 5. Scores ───────────────────────────────────────────────────────
-        var (confluenceScore, confidenceScore) = CalculateScores(trend, momentum, structure, signal);
+        var (confluenceScore, confidenceScore) = CalculateScores(trend, momentum, structure, signal, snap.Regime);
 
         // ── 6. Trade parameters (1% risk rule) ─────────────────────────────
         var parameters = CalculateParameters(snap, signal, equity);
@@ -203,9 +206,27 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
              : SignalDirection.HOLD;
     }
 
+    // ── Regime Filter ─────────────────────────────────────────────────────────
+    // Ranging (ADX < 20): force HOLD kecuali price sangat dekat S/R (structure ≥ 0.80)
+    // Transitional: biarkan sinyal jalan tapi akan ada warning + penalti confidence
+    // Trending: boost sinyal, tidak ada override
+    // Volatile: tidak ada override tapi warning wajib
+    private static SignalDirection ApplyRegimeFilter(
+        SignalDirection signal, MarketSnapshot snap, StructureAnalysis structure)
+    {
+        if (snap.Regime != "Ranging") return signal;     // non-ranging: tidak di-override
+
+        // Ranging + price sangat dekat S/R → boleh trade mean-reversion
+        if (structure.Score >= 0.80m) return signal;
+
+        // Ranging + mid-range → tidak ada setup yang layak
+        return SignalDirection.HOLD;
+    }
+
     // ── Confluence & Confidence Scores ────────────────────────────────────────
     private static (int confluenceScore, decimal confidenceScore) CalculateScores(
-        TrendAnalysis trend, MomentumAnalysis momentum, StructureAnalysis structure, SignalDirection signal)
+        TrendAnalysis trend, MomentumAnalysis momentum, StructureAnalysis structure,
+        SignalDirection signal, string regime = "Unknown")
     {
         // Confluence = weighted average
         var raw = (trend.Score * 0.40m + momentum.Score * 0.35m + structure.Score * 0.25m) * 100m;
@@ -222,6 +243,19 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
 
         // Penalti untuk HOLD — signal lemah
         if (signal == SignalDirection.HOLD) confidenceScore = Math.Min(confidenceScore, 0.62m);
+
+        // ── Regime confidence adjustment ────────────────────────────────────
+        // Trending:      indikator lebih reliable → bonus +5%
+        // Ranging:       MA kurang reliable, forced HOLD → penalti -10%
+        // Transitional:  ketidakpastian → penalti kecil -3%
+        // Volatile/Unknown: tidak ada penyesuaian
+        confidenceScore = regime switch
+        {
+            "Trending"     => Math.Min(confidenceScore + 0.05m, 0.95m),
+            "Ranging"      => Math.Max(confidenceScore - 0.10m, 0.35m),
+            "Transitional" => Math.Max(confidenceScore - 0.03m, 0.35m),
+            _              => confidenceScore
+        };
 
         return (confluenceScore, Math.Round(confidenceScore, 2));
     }
@@ -309,6 +343,27 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             w.Add($"Confidence {confidenceScore:P0} di bawah 70% — trade dengan ukuran lebih kecil.");
         if (signal == SignalDirection.HOLD)
             w.Add("Indikator tidak konsensus — tunggu konfirmasi lebih lanjut.");
+
+        // ── Regime-specific warnings ─────────────────────────────────────────
+        if (snap.ADX14 > 0)
+        {
+            switch (snap.Regime)
+            {
+                case "Ranging":
+                    w.Add($"ADX {snap.ADX14:F1} — market ranging (sideway). Sinyal MA kurang reliable; " +
+                          (signal == SignalDirection.HOLD ? "sinyal di-override ke HOLD." : "entry hanya di dekat S/R."));
+                    break;
+                case "Transitional":
+                    w.Add($"ADX {snap.ADX14:F1} — market transitional. Mungkin mulai trending atau masih sideway — tunggu konfirmasi.");
+                    break;
+                case "Volatile":
+                    w.Add($"ADX {snap.ADX14:F1} — market volatile / strongly trending. Spread mungkin melebar; pakai SL lebih lebar.");
+                    break;
+                case "Trending":
+                    // Tidak ada warning — ini kondisi ideal untuk trend following
+                    break;
+            }
+        }
 
         return w;
     }

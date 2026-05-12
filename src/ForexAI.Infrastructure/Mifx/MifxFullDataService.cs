@@ -37,9 +37,11 @@ public class MifxFullDataService : IMarketDataService
                 "lalu restart EA di chart.");
 
         decimal atrPips = tick.ATR14.HasValue ? Math.Round(tick.ATR14.Value / 0.0001m, 1) : 0m;
+        decimal adx14   = tick.ADX14 ?? 0m;
+        string  regime  = DetectRegime(adx14);
         _logger.LogInformation(
-            "MT5 full data: {Pair} price={Price:F5} MA20M15={MA20:F5} RSI={RSI:F1} ATR={ATR:F1}pip S={S:F5} R={R:F5}",
-            tick.Pair, tick.Mid, tick.MA20_M15, tick.RSI14, atrPips, tick.Support, tick.Resistance);
+            "MT5 full data: {Pair} price={Price:F5} MA20M15={MA20:F5} RSI={RSI:F1} ATR={ATR:F1}pip ADX={ADX:F1} regime={Regime}",
+            tick.Pair, tick.Mid, tick.MA20_M15, tick.RSI14, atrPips, adx14, regime);
 
         var snapshot = new MarketSnapshot(
             Pair:           pair,
@@ -55,9 +57,30 @@ public class MifxFullDataService : IMarketDataService
             ResistanceZone: tick.Resistance?.ToString("F5", CultureInfo.InvariantCulture) ?? "",
             Session:        DetectSession(tick.Time),
             CapturedAt:     tick.Time,
-            ATR14:          tick.ATR14 ?? 0m);
+            ATR14:          tick.ATR14 ?? 0m,
+            ADX14:          adx14,
+            Regime:         regime);
 
         return Task.FromResult(snapshot);
+    }
+
+    /// <summary>
+    /// Deteksi market regime dari ADX(14):
+    /// &lt;20 = Ranging (sideway, MA kurang reliable)
+    /// 20-25 = Transitional (mungkin mulai trending atau masih sideway)
+    /// 25-40 = Trending (trend following optimal)
+    /// &gt;40 = Volatile (trend kuat atau pre-reversal — waspada)
+    /// </summary>
+    private static string DetectRegime(decimal adx14)
+    {
+        if (adx14 <= 0m) return "Unknown";
+        return adx14 switch
+        {
+            < 20m  => "Ranging",
+            < 25m  => "Transitional",
+            < 40m  => "Trending",
+            _      => "Volatile"
+        };
     }
 
     private static string DetectSession(DateTimeOffset time)

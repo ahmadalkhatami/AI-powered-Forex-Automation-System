@@ -16,4 +16,9 @@ public interface ITradePositionRepository
     /// Penjumlahan RiskAmount semua TradePosition (non-SKIPPED) yang OpenedAt-nya pada UTC day yang sama dengan asOfUtc.
     /// </summary>
     Task<DailyRiskUsage> GetDailyRiskUsageAsync(DateTimeOffset asOfUtc);
+
+    /// <summary>
+    /// Simpan beberapa posisi sekaligus dalam satu file write — efisien untuk sync batch PnL.
+    /// </summary>
+    Task SaveManyAsync(IEnumerable<TradePosition> positions);
 }

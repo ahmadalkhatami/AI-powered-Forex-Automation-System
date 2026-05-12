@@ -22,6 +22,7 @@ public static class DependencyInjection
     {
         var mifx = configuration.GetSection(MifxSettings.Section).Get<MifxSettings>() ?? new();
 
+        services.AddScoped<EaDeployService>();
         services.AddScoped<ITradePositionRepository, JsonTradePositionRepository>();
         services.AddScoped<ISignalRepository, JsonSignalRepository>();
         services.AddScoped<ISignalAnalyzer, LiveSignalAnalyzer>();
@@ -36,6 +37,7 @@ public static class DependencyInjection
         // MIFX singletons — selalu didaftarkan agar MifxBridgeController bisa menerima tick
         services.AddSingleton<MifxPriceFeed>();
         services.AddSingleton<MifxCommandQueue>();
+        services.AddScoped<MifxPositionSyncService>();
 
         // IMarketDataService: MT5 full data (tanpa Yahoo) atau Yahoo saja (simulasi)
         if (mifx.EnableLivePrice)

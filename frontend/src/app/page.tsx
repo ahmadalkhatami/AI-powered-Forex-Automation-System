@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Cpu } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { SignalHero } from '@/components/dashboard/SignalHero'
@@ -23,6 +23,7 @@ import {
   getAccountHealth,
   getMifxStatus,
   closePosition,
+  deployEa,
 } from '@/lib/api'
 import type {
   SignalHeroData,
@@ -157,6 +158,7 @@ export default function DashboardPage() {
   const { toast } = useToast()
 
   const [pageState, setPageState] = useState<PageState>('no-signal')
+  const [eaDeploying, setEaDeploying] = useState(false)
   const [rawSignal, setRawSignal] = useState<TradeSignalResponse | null>(null)
   const [riskValidation, setRiskValidation] = useState<RiskValidationResponse | null>(null)
   const [positions, setPositions] = useState<TradePositionResponse[]>([])
@@ -256,14 +258,45 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Poll MIFX live price setiap 2 detik
+  // Poll MIFX live price + posisi + account health setiap 2 detik
   useEffect(() => {
     const poll = async () => {
+      // MIFX status (live price, balance, equity)
       try {
         const s = await getMifxStatus()
         setMifxStatus(s)
       } catch {
         setMifxStatus(null)
+      }
+      // Posisi terbaru (FloatingPnl di-sync dari EA setiap tick)
+      try {
+        const all = await getAllPositions()
+        setPositions(all)
+      } catch {
+        // keep previous value
+      }
+      // Account health (equity termasuk unrealized PnL dari MIFX)
+      try {
+        const health = await getAccountHealth()
+        setAccountHealth({
+          equity: health.equity,
+          peakEquity: health.peakEquity,
+          drawdownPct: health.drawdownPct,
+          openPositions: health.openPositions,
+          maxPositions: health.maxPositions,
+          totalTrades: health.totalTrades,
+          winRate: health.winRate,
+          source: health.source,
+          riskTier: health.riskTier,
+          riskPerTradePct: health.riskPerTradePct,
+          dailyCapPct: health.dailyCapPct,
+          maxDailyTrades: health.maxDailyTrades,
+          dailyRiskUsedUsd: health.dailyRiskUsedUsd,
+          tradesOpenedToday: health.tradesOpenedToday,
+          dailyCapUtilization: health.dailyCapUtilization,
+        })
+      } catch {
+        // keep previous value
       }
     }
     poll()
@@ -275,6 +308,8 @@ export default function DashboardPage() {
     if (!rawSignal || !riskValidation) return
     setPageState('processing')
     try {
+      // Mode MIFX_DEMO jika EA terkoneksi, SIMULATION jika tidak
+      const tradeMode = mifxStatus?.connected ? 'MIFX_DEMO' : 'SIMULATION'
       const position = await executeTrade({
         signalId: rawSignal.id,
         riskValidation: {
@@ -286,14 +321,43 @@ export default function DashboardPage() {
         },
         peakEquity: accountHealth.peakEquity,
         currentEquity: accountHealth.equity,
-        mode: 'SIMULATION',
+        mode: tradeMode,
       })
       await Promise.all([refreshPositions(), refreshAccountHealth()])
-      setPageState('monitoring')
-      toast({ title: 'Position opened', description: `${position.tradeId} — ACTIVE` })
+      const isSkipped = position.status === 'SKIPPED'
+      if (isSkipped) {
+        // Skipped by hard limit (max position, drawdown, risk cap)
+        setPageState('signal-ready')
+        toast({
+          title: '⚠ Trade skipped',
+          description: position.skipReason ?? 'Ditolak oleh hard limit',
+          variant: 'destructive',
+        })
+      } else {
+        setPageState('monitoring')
+        const modeLabel = tradeMode === 'MIFX_DEMO' ? '🟢 MIFX' : '🔵 SIMULATION'
+        toast({ title: `Position opened (${modeLabel})`, description: `${position.tradeId} — ACTIVE` })
+      }
     } catch {
       setPageState('signal-ready')
       toast({ title: 'Execute failed', description: 'Trade could not be executed', variant: 'destructive' })
+    }
+  }
+
+  const handleDeployEa = async () => {
+    setEaDeploying(true)
+    try {
+      const result = await deployEa()
+      toast({
+        title: result.success ? '📋 EA Updated' : '❌ Update gagal',
+        description: result.message,
+        variant: result.success ? 'default' : 'destructive',
+        duration: result.success ? 8000 : 5000,
+      })
+    } catch (err) {
+      toast({ title: '❌ Deploy gagal', description: String(err), variant: 'destructive' })
+    } finally {
+      setEaDeploying(false)
     }
   }
 
@@ -322,6 +386,8 @@ export default function DashboardPage() {
     ? mifxStatus.mid
     : candles[candles.length - 1]?.close
   const capturedAt = rawSignal?.snapshot?.capturedAt
+  const regime     = rawSignal?.snapshot?.regime ?? null
+  const adx14      = rawSignal?.snapshot?.adX14  ?? null
 
   const heroData = rawSignal ? mapToSignalHeroData(rawSignal, riskValidation, accountHealth.equity) : null
   const analysisData = rawSignal ? mapToSignalAnalysisData(rawSignal) : null
@@ -363,17 +429,42 @@ export default function DashboardPage() {
                 {currentPrice.toFixed(5)}
               </span>
             )}
+            {/* Regime badge — tampil setelah analisis dijalankan */}
+            {regime && regime !== 'Unknown' && (
+              <span className={cn(
+                'px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border',
+                regime === 'Trending'     && 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30 dark:text-emerald-400',
+                regime === 'Ranging'      && 'bg-amber-500/10 text-amber-600 border-amber-500/30 dark:text-amber-400',
+                regime === 'Volatile'     && 'bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400',
+                regime === 'Transitional' && 'bg-blue-500/10 text-blue-600 border-blue-500/30 dark:text-blue-400',
+              )}>
+                {regime} {adx14 !== null && adx14 > 0 ? `ADX ${adx14.toFixed(1)}` : ''}
+              </span>
+            )}
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={runFullPipeline}
-            disabled={pageState === 'loading' || pageState === 'processing'}
-            className="gap-2"
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', pageState === 'loading' && 'animate-spin')} />
-            Trigger Analysis
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDeployEa}
+              disabled={eaDeploying}
+              className="gap-2"
+              title="Copy + compile EA terbaru ke MT5 otomatis"
+            >
+              <Cpu className={cn('h-3.5 w-3.5', eaDeploying && 'animate-pulse')} />
+              {eaDeploying ? 'Compiling…' : 'Update EA'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={runFullPipeline}
+              disabled={pageState === 'loading' || pageState === 'processing'}
+              className="gap-2"
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', pageState === 'loading' && 'animate-spin')} />
+              Trigger Analysis
+            </Button>
+          </div>
         </div>
 
         {/* Candlestick Chart */}
@@ -412,6 +503,7 @@ export default function DashboardPage() {
             <ApproveRejectActions
               state={actionState}
               signal={heroData}
+              mode={mifxStatus?.connected ? 'MIFX_DEMO' : 'SIMULATION'}
               onApprove={handleApprove}
               onReject={handleReject}
             />

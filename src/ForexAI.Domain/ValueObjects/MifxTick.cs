@@ -15,6 +15,7 @@ public record MifxTick(
     decimal? RSI14       = null,
     int?     RSIDir      = null,   // 1=rising, 0=falling
     decimal? ATR14       = null,   // ATR(14) M15 dalam satuan harga (EA v1.16+)
+    decimal? ADX14       = null,   // ADX(14) M15 trend strength 0-100 (EA v1.17+)
     decimal? Support     = null,
     decimal? Resistance  = null
 )

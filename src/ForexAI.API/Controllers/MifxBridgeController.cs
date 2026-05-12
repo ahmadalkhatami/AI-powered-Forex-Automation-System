@@ -6,6 +6,17 @@ namespace ForexAI.API.Controllers;
 
 // ── Request / Response DTOs ────────────────────────────────────────
 
+/// <summary>Satu posisi open dari EA MT5 (EA v1.18+)</summary>
+public record MifxPositionDto(
+    long    Ticket,
+    string  Type,       // "BUY" | "SELL"
+    string  Symbol,
+    decimal Lots,
+    decimal OpenPrice,
+    decimal Profit,
+    int     Pips
+);
+
 public record MifxTickRequest(
     string Pair,
     decimal Bid,
@@ -21,8 +32,11 @@ public record MifxTickRequest(
     decimal? Rsi14      = null,
     int?     RsiDir     = null,       // 1=rising, 0=falling/flat
     decimal? Atr14      = null,       // ATR(14) M15 dalam satuan harga (EA v1.16+)
+    decimal? Adx14      = null,       // ADX(14) M15 trend strength 0-100 (EA v1.17+)
     decimal? Support    = null,
-    decimal? Resistance = null
+    decimal? Resistance = null,
+    // ── Posisi open EA (EA v1.18+) ────────────────────────────────────
+    List<MifxPositionDto>? Positions  = null
 );
 
 public record MifxStatusRequest(
@@ -44,24 +58,27 @@ public record MifxOrderResultRequest(
 [Route("api/mifx")]
 public class MifxBridgeController : ControllerBase
 {
-    private readonly MifxPriceFeed    _feed;
-    private readonly MifxCommandQueue _queue;
+    private readonly MifxPriceFeed            _feed;
+    private readonly MifxCommandQueue         _queue;
+    private readonly MifxPositionSyncService  _syncService;
     private readonly ILogger<MifxBridgeController> _logger;
 
     public MifxBridgeController(
         MifxPriceFeed feed,
         MifxCommandQueue queue,
+        MifxPositionSyncService syncService,
         ILogger<MifxBridgeController> logger)
     {
-        _feed   = feed;
-        _queue  = queue;
-        _logger = logger;
+        _feed        = feed;
+        _queue       = queue;
+        _syncService = syncService;
+        _logger      = logger;
     }
 
-    // ── Dipanggil EA setiap detik: kirim bid/ask terbaru ──────────
+    // ── Dipanggil EA setiap detik: kirim bid/ask terbaru + posisi open ──
 
     [HttpPost("tick")]
-    public IActionResult ReceiveTick([FromBody] MifxTickRequest req)
+    public async Task<IActionResult> ReceiveTick([FromBody] MifxTickRequest req)
     {
         var tick = new MifxTick(
             Pair:           req.Pair,
@@ -77,10 +94,22 @@ public class MifxBridgeController : ControllerBase
             RSI14:          req.Rsi14,
             RSIDir:         req.RsiDir,
             ATR14:          req.Atr14,
+            ADX14:          req.Adx14,
             Support:        req.Support,
             Resistance:     req.Resistance);
 
-        _feed.Update(tick);
+        // Konversi DTO posisi ke domain value object (null = EA lama, tidak mengirim posisi)
+        IReadOnlyList<MifxBrokerPosition>? brokerPositions = req.Positions?
+            .Select(p => new MifxBrokerPosition(
+                p.Ticket, p.Type, p.Symbol, p.Lots, p.OpenPrice, p.Profit, p.Pips))
+            .ToList();
+
+        _feed.Update(tick, brokerPositions);
+
+        // Sync PnL + auto-close hanya jika EA mengirim field positions (EA v1.18+)
+        if (req.Positions is not null)
+            await _syncService.SyncAsync(brokerPositions ?? Array.Empty<MifxBrokerPosition>());
+
         return Ok();
     }
 

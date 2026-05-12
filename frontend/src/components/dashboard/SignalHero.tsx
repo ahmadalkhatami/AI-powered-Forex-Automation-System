@@ -12,8 +12,8 @@ function deriveState(
   signal: SignalHeroData | null,
   mode: 'monitoring' | 'default'
 ): HeroState {
-  if (mode === 'monitoring') return 'monitoring'
-  if (!signal) return 'no-signal'
+  // Kalau tidak ada signal, baru tampilkan monitoring placeholder
+  if (!signal) return mode === 'monitoring' ? 'monitoring' : 'no-signal'
   if (signal.decision === 'NO-GO') return 'active-nogo'
   if (signal.decision === 'GO_WITH_CAUTION') return 'active-caution'
   return 'active-go'
@@ -46,7 +46,14 @@ export function SignalHero({ signal, mode, onTriggerAnalysis }: SignalHeroProps)
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-6">
             <span className="text-5xl font-black text-emerald-600 dark:text-emerald-400">{signal.signal}</span>
-            <span className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">GO ✓</span>
+            <div className="flex items-center gap-2">
+              <span className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">GO ✓</span>
+              {mode === 'monitoring' && (
+                <span className="text-xs bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-semibold animate-pulse">
+                  ● LIVE
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-3 mt-2">
             <span className="text-sm text-muted-foreground">{signal.pair} · {signal.timeframe}</span>
@@ -82,6 +89,11 @@ export function SignalHero({ signal, mode, onTriggerAnalysis }: SignalHeroProps)
             <div className="flex items-center gap-2">
               <AlertTriangle size={20} className="text-amber-500 dark:text-amber-400" />
               <span className="text-2xl font-bold text-amber-500 dark:text-amber-400">GO WITH CAUTION</span>
+              {mode === 'monitoring' && (
+                <span className="text-xs bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-semibold animate-pulse">
+                  ● LIVE
+                </span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-3 mt-2">

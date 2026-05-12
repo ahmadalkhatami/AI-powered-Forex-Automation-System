@@ -86,6 +86,16 @@ export async function getMifxStatus(): Promise<MifxStatusResponse> {
   return fetchApi('/api/mifx/status')
 }
 
+export async function deployEa(): Promise<{
+  success: boolean
+  message: string
+  compiled: boolean
+  deployedPath: string
+  compileLog: string
+}> {
+  return fetchApi('/api/ea/deploy', { method: 'POST' })
+}
+
 export async function closePosition(
   tradeId: string,
   outcome: 'WIN' | 'LOSS',

@@ -176,6 +176,29 @@ public class TradePosition
         ClosedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// Update floating PnL langsung dari nilai broker (EA MT5).
+    /// Tidak menghitung ulang dari harga — gunakan profit asli dari MIFX.
+    /// </summary>
+    public void UpdatePnlFromBroker(decimal profit, int pips)
+    {
+        if (Status != TradeStatus.ACTIVE) return;
+        FloatingPnl     = profit;
+        FloatingPnlPips = pips;
+    }
+
+    /// <summary>
+    /// Tandai posisi sebagai ditutup oleh broker (SL/TP hit atau manual close di MT5).
+    /// Dipanggil saat EA tidak lagi melaporkan posisi ini di daftar open positions.
+    /// FloatingPnl dipertahankan sebagai nilai PnL terakhir yang diketahui.
+    /// </summary>
+    public void ClosedByBroker(TradeStatus outcome)
+    {
+        if (Status != TradeStatus.ACTIVE) return;
+        Status   = outcome;
+        ClosedAt = DateTimeOffset.UtcNow;
+    }
+
     public void UpdateFloatingPnl(decimal currentPrice)
     {
         if (Status != TradeStatus.ACTIVE) return;

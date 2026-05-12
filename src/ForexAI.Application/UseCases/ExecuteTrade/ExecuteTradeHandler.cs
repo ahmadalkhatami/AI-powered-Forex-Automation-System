@@ -11,7 +11,9 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
 {
     private const int MaxOpenPositions = 3;
     private const decimal MaxDrawdownPct = 0.10m;
-    private const decimal MaxRiskPerTradePct = 0.01m;
+    // 1% target + 5 basis-point tolerance untuk floating point dan
+    // equity drift kecil antara saat risk evaluation dan saat execute.
+    private const decimal MaxRiskPerTradePct = 0.0105m;
 
     private readonly ISignalRepository _signals;
     private readonly ITradePositionRepository _positions;
@@ -35,7 +37,7 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
         var signal = await _signals.GetByIdAsync(request.SignalId)
             ?? throw new InvalidOperationException($"Signal {request.SignalId} not found");
 
-        var tradePrefix = _broker.IsLive ? "OANDA" : "SIM";
+        var tradePrefix = _broker.IsLive ? "MIFX" : "SIM";
         var tradeId = $"{tradePrefix}-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}";
 
         // First Law: never execute without GO
@@ -87,7 +89,7 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
         var actualRiskPct = currentEquity > 0 ? p.RiskAmount / currentEquity : p.RiskAmount;
         if (actualRiskPct > MaxRiskPerTradePct)
         {
-            var msg = $"Risk {actualRiskPct:P2} exceeds 1% limit";
+            var msg = $"Risk {actualRiskPct:P2} exceeds 1% hard limit (equity drift check)";
             _logger.LogWarning("Trade skipped: {Reason}", msg);
             var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
             await _positions.SaveAsync(skipped);
@@ -109,7 +111,7 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
 
             if (externalId == null)
             {
-                var msg = "OANDA order was cancelled (FOK not filled)";
+                var msg = "Broker order gagal atau timeout — EA tidak merespons";
                 _logger.LogWarning("Trade skipped: {Reason}", msg);
                 var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
                 await _positions.SaveAsync(skipped);
@@ -128,11 +130,11 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
                 p.RiskAmount,
                 p.PotentialProfit,
                 p.RiskRewardRatio,
-                mode: "OANDA_DEMO",
+                mode: "MIFX_DEMO",
                 externalTradeId: externalId);
 
             _logger.LogInformation(
-                "Trade OPEN [OANDA_DEMO] {TradeId} (ext:{ExternalId}) — {Direction} {Pair} @ {Entry}, SL {SL}, TP {TP}, lot {Lot}",
+                "Trade OPEN [MIFX_DEMO] {TradeId} (ext:{ExternalId}) — {Direction} {Pair} @ {Entry}, SL {SL}, TP {TP}, lot {Lot}",
                 tradeId, externalId, signal.Signal, signal.Pair,
                 p.Entry, p.StopLoss, p.TakeProfit, p.LotSize);
         }

@@ -19,6 +19,7 @@ import type { ActionState, SignalHeroData } from '@/lib/types'
 interface ApproveRejectActionsProps {
   state: ActionState
   signal: SignalHeroData
+  mode?: 'MIFX_DEMO' | 'SIMULATION'
   onApprove?: () => void
   onReject?: () => void
 }
@@ -26,6 +27,7 @@ interface ApproveRejectActionsProps {
 export function ApproveRejectActions({
   state,
   signal,
+  mode = 'SIMULATION',
   onApprove,
   onReject,
 }: ApproveRejectActionsProps) {
@@ -44,11 +46,11 @@ export function ApproveRejectActions({
             'flex-1 font-semibold',
             state === 'enabled-go' && 'bg-emerald-600 hover:bg-emerald-700 text-white',
             state === 'enabled-caution' && 'bg-amber-500 hover:bg-amber-600 text-white',
-            state === 'disabled-nogo' && 'bg-emerald-600 text-white opacity-50 cursor-not-allowed pointer-events-none',
+            state === 'disabled-nogo' && 'bg-emerald-600 text-white opacity-70',
             state === 'processing' && 'bg-emerald-600 text-white opacity-75 cursor-not-allowed pointer-events-none',
           )}
-          aria-disabled={isNoGo || isProcessing}
-          onClick={!isNoGo && !isProcessing ? () => setApproveOpen(true) : undefined}
+          aria-disabled={isProcessing}
+          onClick={!isProcessing ? () => setApproveOpen(true) : undefined}
         >
           {isProcessing ? (
             <span className="flex items-center gap-2">
@@ -96,9 +98,15 @@ export function ApproveRejectActions({
                   Stop Loss: {signal.parameters?.stopLoss.toFixed(4) ?? '—'} | Take Profit:{' '}
                   {signal.parameters?.takeProfit.toFixed(4) ?? '—'}
                 </p>
-                <p className="font-semibold text-amber-600 dark:text-amber-400">
+                <p className={cn(
+                  'font-semibold',
+                  mode === 'MIFX_DEMO'
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-amber-600 dark:text-amber-400',
+                )}>
                   Risk: ${signal.parameters?.riskAmount.toFixed(2) ?? '—'} (
-                  {signal.parameters?.riskPercent.toFixed(2) ?? '—'}% equity) — SIMULATION
+                  {signal.parameters?.riskPercent.toFixed(2) ?? '—'}% equity) —{' '}
+                  {mode === 'MIFX_DEMO' ? '🟢 LIVE ke MIFX' : '🔵 SIMULATION'}
                 </p>
               </div>
             </AlertDialogDescription>

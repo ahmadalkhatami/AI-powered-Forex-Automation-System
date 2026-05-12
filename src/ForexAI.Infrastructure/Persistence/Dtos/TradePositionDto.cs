@@ -20,4 +20,5 @@ internal record TradePositionDto
     public DateTimeOffset? ClosedAt { get; init; }
     public string Mode { get; init; } = "";
     public string? SkipReason { get; init; }
+    public string? ExternalTradeId { get; init; }
 }

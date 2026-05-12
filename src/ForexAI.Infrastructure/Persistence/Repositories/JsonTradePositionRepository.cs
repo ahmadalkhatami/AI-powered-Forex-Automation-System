@@ -142,6 +142,22 @@ public class JsonTradePositionRepository : ITradePositionRepository
             string.Equals(d.Status, "ACTIVE", StringComparison.OrdinalIgnoreCase));
     }
 
+    public async Task SaveManyAsync(IEnumerable<TradePosition> positions)
+    {
+        var all = await LoadAllAsync();
+        foreach (var position in positions)
+        {
+            var dto = DtoMapper.ToDto(position);
+            var idx = all.FindIndex(d =>
+                string.Equals(d.TradeId, position.TradeId, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0)
+                all[idx] = dto;
+            else
+                all.Add(dto);
+        }
+        await SaveAllAsync(all);
+    }
+
     public async Task<DailyRiskUsage> GetDailyRiskUsageAsync(DateTimeOffset asOfUtc)
     {
         var all = await LoadAllAsync();

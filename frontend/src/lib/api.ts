@@ -5,6 +5,9 @@ import type {
   TradePositionResponse,
   EvaluateRiskRequest,
   ExecuteTradeRequest,
+  CandleBar,
+  AccountHealthResponse,
+  MifxStatusResponse,
 } from '@/lib/types'
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -13,8 +16,14 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   })
   if (!res.ok) {
-    const text = await res.text()
-    throw new Error(`API ${res.status}: ${text}`)
+    // Coba parse error message dari JSON response backend
+    try {
+      const body = await res.json() as { error?: string }
+      throw new Error(body.error ?? `API error ${res.status}`)
+    } catch (parseErr) {
+      if (parseErr instanceof SyntaxError) throw new Error(`API error ${res.status}`)
+      throw parseErr
+    }
   }
   return res.json() as Promise<T>
 }
@@ -60,4 +69,30 @@ export async function getPositionStatus(
 
 export async function getAllPositions(): Promise<TradePositionResponse[]> {
   return fetchApi('/api/position')
+}
+
+export async function getCandles(
+  pair: string = 'EURUSD',
+  count: number = 90,
+): Promise<CandleBar[]> {
+  return fetchApi(`/api/market/candles?pair=${pair}&count=${count}`)
+}
+
+export async function getAccountHealth(): Promise<AccountHealthResponse> {
+  return fetchApi('/api/account')
+}
+
+export async function getMifxStatus(): Promise<MifxStatusResponse> {
+  return fetchApi('/api/mifx/status')
+}
+
+export async function closePosition(
+  tradeId: string,
+  outcome: 'WIN' | 'LOSS',
+  exitPrice: number,
+): Promise<TradePositionResponse> {
+  return fetchApi(`/api/position/${tradeId}/close`, {
+    method: 'POST',
+    body: JSON.stringify({ outcome, exitPrice }),
+  })
 }

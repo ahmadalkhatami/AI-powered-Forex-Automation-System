@@ -11,12 +11,18 @@ import { SignalAnalysisPanel } from '@/components/dashboard/SignalAnalysisPanel'
 import { RiskGatePanel } from '@/components/dashboard/RiskGatePanel'
 import { AccountHealthBar } from '@/components/dashboard/AccountHealthBar'
 import { PositionsList } from '@/components/dashboard/PositionsList'
+import { CandlestickChart } from '@/components/dashboard/CandlestickChart'
+import { MifxLiveTicker } from '@/components/dashboard/MifxLiveTicker'
 import { useToast } from '@/hooks/use-toast'
 import {
   analyzeSignal,
   evaluateRisk,
   executeTrade,
-  getPositionStatus,
+  getAllPositions,
+  getCandles,
+  getAccountHealth,
+  getMifxStatus,
+  closePosition,
 } from '@/lib/api'
 import type {
   SignalHeroData,
@@ -30,18 +36,17 @@ import type {
   RiskValidationResponse,
   TradePositionResponse,
   TradeParametersResponse,
+  CandleBar,
+  MifxStatusResponse,
 } from '@/lib/types'
 
-const DEFAULT_EQUITY = 10_000
-const DEFAULT_PEAK_EQUITY = 10_000
+const INITIAL_EQUITY = 1_000
 const PAIR = 'EURUSD'
-const TIMEFRAME = 'M15'
+const TIMEFRAME = '1D'
 
-type PageState = 'loading' | 'no-signal' | 'signal-ready' | 'processing' | 'monitoring' | 'error'
+type PageState = 'loading' | 'no-signal' | 'signal-ready' | 'processing' | 'monitoring' | 'error' | 'ea-update-required'
 
-// --- Data adapter functions ---
-
-function mapTradeParameters(p: TradeParametersResponse): TradeParametersData {
+function mapTradeParameters(p: TradeParametersResponse, equity: number): TradeParametersData {
   return {
     entry: p.entry,
     stopLoss: p.stopLoss,
@@ -50,7 +55,7 @@ function mapTradeParameters(p: TradeParametersResponse): TradeParametersData {
     takeProfitPips: p.takeProfitPips,
     lotSize: p.lotSize,
     riskAmount: p.riskAmount,
-    riskPercent: (p.riskAmount / DEFAULT_EQUITY) * 100,
+    riskPercent: equity > 0 ? (p.riskAmount / equity) * 100 : 0,
     potentialProfit: p.potentialProfit,
     riskRewardRatio: p.riskRewardRatio,
   }
@@ -59,6 +64,7 @@ function mapTradeParameters(p: TradeParametersResponse): TradeParametersData {
 function mapToSignalHeroData(
   signal: TradeSignalResponse,
   risk: RiskValidationResponse | null,
+  equity: number,
 ): SignalHeroData {
   return {
     id: signal.id,
@@ -71,21 +77,19 @@ function mapToSignalHeroData(
     timestamp: signal.timestamp,
     cautionNotes: risk?.cautionNotes ?? [],
     blockReason: risk?.noGoReasons?.[0],
-    parameters: mapTradeParameters(signal.parameters),
+    parameters: mapTradeParameters(signal.parameters, equity),
   }
 }
 
-function mapToSignalAnalysisData(
-  signal: TradeSignalResponse,
-): SignalAnalysisData {
+function mapToSignalAnalysisData(signal: TradeSignalResponse): SignalAnalysisData {
   return {
     trendScore: signal.trend.score,
     trendBias: signal.trend.bias,
     trendStrength: signal.trend.strength,
     trendRationale: signal.trend.scoreRationale,
     momentumScore: signal.momentum.score,
-    momentumRSI: signal.momentum.rSIValue,
-    momentumDirection: signal.momentum.rSIDirection,
+    momentumRSI: signal.momentum.rsiValue,
+    momentumDirection: signal.momentum.rsiDirection,
     momentumRationale: signal.momentum.scoreRationale,
     structureScore: signal.structure.score,
     structurePattern: signal.structure.candlePattern,
@@ -100,12 +104,14 @@ function mapToSignalAnalysisData(
 function mapToRiskGatePanelData(
   risk: RiskValidationResponse,
   openPositions: number,
+  equity: number,
+  drawdownPct: number,
 ): RiskGatePanelData {
   const params = risk.validatedParameters
   return {
     decision: risk.decision,
-    equity: DEFAULT_EQUITY,
-    drawdownPct: 0,
+    equity,
+    drawdownPct,
     openPositions,
     maxPositions: 3,
     cautionNotes: risk.cautionNotes,
@@ -147,27 +153,71 @@ function deriveActionState(
   return 'enabled-go'
 }
 
-// ---
-
 export default function DashboardPage() {
   const { toast } = useToast()
 
-  const [pageState, setPageState] = useState<PageState>('loading')
+  const [pageState, setPageState] = useState<PageState>('no-signal')
   const [rawSignal, setRawSignal] = useState<TradeSignalResponse | null>(null)
   const [riskValidation, setRiskValidation] = useState<RiskValidationResponse | null>(null)
   const [positions, setPositions] = useState<TradePositionResponse[]>([])
+  const [candles, setCandles] = useState<CandleBar[]>([])
+  const [mifxStatus, setMifxStatus] = useState<MifxStatusResponse | null>(null)
+  const [accountHealth, setAccountHealth] = useState<AccountHealthData>({
+    equity: INITIAL_EQUITY,
+    peakEquity: INITIAL_EQUITY,
+    drawdownPct: 0,
+    openPositions: 0,
+    maxPositions: 3,
+    totalTrades: 0,
+    winRate: 0,
+    source: 'SIMULATION',
+  })
+
+  const refreshAccountHealth = useCallback(async () => {
+    try {
+      const health = await getAccountHealth()
+      setAccountHealth({
+        equity: health.equity,
+        peakEquity: health.peakEquity,
+        drawdownPct: health.drawdownPct,
+        openPositions: health.openPositions,
+        maxPositions: health.maxPositions,
+        totalTrades: health.totalTrades,
+        winRate: health.winRate,
+        source: health.source,
+      })
+    } catch {
+      // keep previous value
+    }
+  }, [])
+
+  const refreshPositions = useCallback(async () => {
+    try {
+      const all = await getAllPositions()
+      setPositions(all)
+    } catch {
+      // keep previous value
+    }
+  }, [])
 
   const runFullPipeline = useCallback(async () => {
     setPageState('loading')
     try {
-      const [signal, existingPos] = await Promise.all([
+      const [signal, candleData] = await Promise.all([
         analyzeSignal(PAIR, TIMEFRAME),
-        getPositionStatus(PAIR),
+        getCandles(PAIR, 90),
       ])
 
-      const currentPositions = existingPos && existingPos.status === 'ACTIVE' ? [existingPos] : []
-      setPositions(currentPositions)
+      setCandles(candleData)
       setRawSignal(signal)
+
+      const [allPos] = await Promise.all([
+        getAllPositions(),
+        refreshAccountHealth(),
+      ])
+      setPositions(allPos)
+
+      const openCount = allPos.filter((p) => p.status === 'ACTIVE').length
 
       const risk = await evaluateRisk({
         signalId: signal.id,
@@ -175,22 +225,44 @@ export default function DashboardPage() {
         adjustedConfidence: signal.confidenceScore,
         totalScore: signal.confluenceScore,
         agreementScore: signal.confidenceScore,
-        equity: DEFAULT_EQUITY,
-        openPositions: currentPositions.length,
+        equity: accountHealth.equity,
+        openPositions: openCount,
       })
       setRiskValidation(risk)
-      setPageState(currentPositions.length > 0 ? 'monitoring' : 'signal-ready')
+      setPageState(openCount > 0 ? 'monitoring' : 'signal-ready')
     } catch (err) {
-      setPageState('error')
       const detail = err instanceof Error ? err.message : String(err)
       console.error('[pipeline] error:', detail, err)
-      toast({ title: 'Connection Error', description: detail, variant: 'destructive' })
+      // EA_UPDATE_REQUIRED = EA v1.14, belum di-compile ke v1.15
+      if (detail.includes('EA_UPDATE_REQUIRED')) {
+        setPageState('ea-update-required')
+      } else {
+        setPageState('error')
+        toast({ title: 'Connection Error', description: detail, variant: 'destructive' })
+      }
     }
-  }, [toast])
+  }, [toast, refreshAccountHealth, accountHealth.equity])
 
+  // Load data ringan saat pertama kali buka (account health + positions, tanpa analisa)
   useEffect(() => {
-    runFullPipeline()
-  }, [runFullPipeline])
+    Promise.all([refreshAccountHealth(), refreshPositions()]).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Poll MIFX live price setiap 2 detik
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const s = await getMifxStatus()
+        setMifxStatus(s)
+      } catch {
+        setMifxStatus(null)
+      }
+    }
+    poll()
+    const id = setInterval(poll, 2000)
+    return () => clearInterval(id)
+  }, [])
 
   const handleApprove = async () => {
     if (!rawSignal || !riskValidation) return
@@ -205,13 +277,13 @@ export default function DashboardPage() {
           cautionNotes: riskValidation.cautionNotes,
           noGoReasons: riskValidation.noGoReasons,
         },
-        peakEquity: DEFAULT_PEAK_EQUITY,
-        currentEquity: DEFAULT_EQUITY,
+        peakEquity: accountHealth.peakEquity,
+        currentEquity: accountHealth.equity,
         mode: 'SIMULATION',
       })
-      setPositions((prev) => [...prev, position])
+      await Promise.all([refreshPositions(), refreshAccountHealth()])
       setPageState('monitoring')
-      toast({ title: 'Position opened', description: `${position.tradeId} active (SIMULATION)` })
+      toast({ title: 'Position opened', description: `${position.tradeId} — ACTIVE` })
     } catch {
       setPageState('signal-ready')
       toast({ title: 'Execute failed', description: 'Trade could not be executed', variant: 'destructive' })
@@ -225,30 +297,66 @@ export default function DashboardPage() {
     toast({ title: 'Signal dismissed', description: 'Run new analysis when ready' })
   }
 
-  // Derived display data
-  const heroData = rawSignal ? mapToSignalHeroData(rawSignal, riskValidation) : null
+  const handleClosePosition = async (tradeId: string, outcome: 'WIN' | 'LOSS', exitPrice: number) => {
+    try {
+      await closePosition(tradeId, outcome, exitPrice)
+      await Promise.all([refreshPositions(), refreshAccountHealth()])
+      toast({
+        title: outcome === 'WIN' ? '✅ Trade closed — WIN' : '❌ Trade closed — LOSS',
+        description: `Exit @ ${exitPrice.toFixed(5)}`,
+      })
+    } catch {
+      toast({ title: 'Close failed', variant: 'destructive' })
+    }
+  }
+
+  // Derived display data — prefer MIFX live mid price over Yahoo candle close
+  const currentPrice = mifxStatus?.connected && mifxStatus.mid
+    ? mifxStatus.mid
+    : candles[candles.length - 1]?.close
+  const capturedAt = rawSignal?.snapshot?.capturedAt
+
+  const heroData = rawSignal ? mapToSignalHeroData(rawSignal, riskValidation, accountHealth.equity) : null
   const analysisData = rawSignal ? mapToSignalAnalysisData(rawSignal) : null
   const riskGateData = riskValidation
-    ? mapToRiskGatePanelData(riskValidation, positions.filter((p) => p.status === 'ACTIVE').length)
+    ? mapToRiskGatePanelData(
+        riskValidation,
+        positions.filter((p) => p.status === 'ACTIVE').length,
+        accountHealth.equity,
+        accountHealth.drawdownPct,
+      )
     : null
   const paramsData = heroData?.parameters ?? null
   const positionCards = positions
     .filter((p) => p.status !== 'SKIPPED')
+    .sort((a, b) => {
+      // ACTIVE first, then by closedAt desc
+      if (a.status === 'ACTIVE' && b.status !== 'ACTIVE') return -1
+      if (a.status !== 'ACTIVE' && b.status === 'ACTIVE') return 1
+      return (b.closedAt ?? '').localeCompare(a.closedAt ?? '')
+    })
     .map(mapToPositionCard)
-  const accountHealth: AccountHealthData = {
-    equity: DEFAULT_EQUITY,
-    peakEquity: DEFAULT_PEAK_EQUITY,
-    drawdownPct: 0,
-    openPositions: positions.filter((p) => p.status === 'ACTIVE').length,
-    maxPositions: 3,
-  }
   const actionState = deriveActionState(pageState, riskValidation)
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-[65%_35%] gap-4">
       <div className="space-y-4 pb-24 sm:pb-0">
-        <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">EUR/USD · M15</span>
+        {/* Header with pair info + MIFX live ticker + trigger */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-medium">EUR/USD</span>
+            <span className="text-xs text-muted-foreground">·</span>
+            <span className="text-xs text-muted-foreground">Daily</span>
+            <span className="text-xs text-muted-foreground">·</span>
+            {/* Live MIFX ticker — menggantikan harga statis */}
+            <MifxLiveTicker status={mifxStatus} />
+            {/* Fallback: tampilkan harga Yahoo jika MIFX offline */}
+            {!mifxStatus?.connected && currentPrice && (
+              <span className="text-sm font-mono font-semibold text-muted-foreground">
+                {currentPrice.toFixed(5)}
+              </span>
+            )}
+          </div>
           <Button
             variant="outline"
             size="sm"
@@ -256,10 +364,34 @@ export default function DashboardPage() {
             disabled={pageState === 'loading' || pageState === 'processing'}
             className="gap-2"
           >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Trigger New Analysis
+            <RefreshCw className={cn('h-3.5 w-3.5', pageState === 'loading' && 'animate-spin')} />
+            Trigger Analysis
           </Button>
         </div>
+
+        {/* Candlestick Chart */}
+        <CandlestickChart
+          candles={candles}
+          pair="EUR/USD"
+          capturedAt={capturedAt}
+        />
+
+        {/* EA update required banner */}
+        {pageState === 'ea-update-required' && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 space-y-2">
+            <p className="text-sm font-semibold text-amber-500">EA v1.15 belum di-compile</p>
+            <p className="text-xs text-muted-foreground">
+              ForexAI_Bridge masih v1.14 dan belum bisa mengirim indikator (MA/RSI/S/R) ke backend.
+            </p>
+            <ol className="text-xs text-muted-foreground list-decimal list-inside space-y-1">
+              <li>Di MT5, tekan <strong>F4</strong> untuk buka MetaEditor</li>
+              <li>File → Open → pilih <strong>ForexAI_Bridge.mq5</strong></li>
+              <li>Tekan <strong>F7</strong> untuk compile</li>
+              <li>Drag ulang EA ke chart EURUSD.m,M15</li>
+              <li>Tekan <strong>Trigger Analysis</strong> lagi</li>
+            </ol>
+          </div>
+        )}
 
         <SignalHero signal={heroData} mode={pageState === 'monitoring' ? 'monitoring' : 'default'} />
         <TradeParametersCard params={paramsData} />
@@ -285,7 +417,11 @@ export default function DashboardPage() {
 
       <div className="space-y-4">
         <AccountHealthBar data={accountHealth} />
-        <PositionsList positions={positionCards.length > 0 ? positionCards : null} />
+        <PositionsList
+          positions={positionCards.length > 0 ? positionCards : null}
+          currentPrice={currentPrice}
+          onClosePosition={handleClosePosition}
+        />
       </div>
     </div>
   )

@@ -164,6 +164,18 @@ public class TradePosition
 
     public bool IsActive() => Status == TradeStatus.ACTIVE;
 
+    public void CloseManually(TradeStatus outcome, decimal exitPrice)
+    {
+        if (Status != TradeStatus.ACTIVE) return;
+        var pipValue = Direction == SignalDirection.BUY
+            ? exitPrice - Entry
+            : Entry - exitPrice;
+        FloatingPnlPips = (int)(pipValue * 10000);
+        FloatingPnl = Math.Round(pipValue * LotSize * 100000 * 0.0001m, 2);
+        Status = outcome;
+        ClosedAt = DateTimeOffset.UtcNow;
+    }
+
     public void UpdateFloatingPnl(decimal currentPrice)
     {
         if (Status != TradeStatus.ACTIVE) return;

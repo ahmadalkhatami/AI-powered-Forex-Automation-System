@@ -4,6 +4,40 @@ export interface AccountHealthData {
   drawdownPct: number     // 0.0–1.0
   openPositions: number
   maxPositions: number    // always 3
+  totalTrades?: number
+  winRate?: number        // 0.0–1.0
+  source?: 'LIVE' | 'SIMULATION'   // LIVE = dari akun broker nyata
+}
+
+export interface CandleBar {
+  time: number            // Unix timestamp seconds
+  open: number
+  high: number
+  low: number
+  close: number
+}
+
+export interface MifxStatusResponse {
+  connected: boolean
+  pair: string | null
+  bid: number | null
+  ask: number | null
+  mid: number | null
+  spreadPips: number | null
+  time: string | null
+}
+
+export interface AccountHealthResponse {
+  equity: number
+  peakEquity: number
+  realizedEquity: number
+  unrealizedPnl: number
+  drawdownPct: number
+  openPositions: number
+  maxPositions: number
+  totalTrades: number
+  winRate: number
+  source: 'LIVE' | 'SIMULATION'
 }
 
 export interface PositionCardData {
@@ -93,8 +127,8 @@ export interface MarketSnapshotResponse {
   mA50_M15: number
   mA20_H1: number
   mA50_H1: number
-  rSI14: number
-  rSIDirection: string
+  rsI14: number            // .NET CamelCase: RSI14 → rsI14
+  rsiDirection: string     // RSIDirection → rsiDirection
   supportZone: string
   resistanceZone: string
   session: string
@@ -111,8 +145,8 @@ export interface TrendAnalysisResponse {
 }
 
 export interface MomentumAnalysisResponse {
-  rSIValue: number
-  rSIDirection: string
+  rsiValue: number         // .NET CamelCase: RSIValue → rsiValue
+  rsiDirection: string     // RSIDirection → rsiDirection
   zone: string
   score: number
   scoreRationale: string

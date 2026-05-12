@@ -32,9 +32,12 @@ if (app.Environment.IsDevelopment())
 
 app.UseExceptionHandler(appBuilder => appBuilder.Run(async ctx =>
 {
-    ctx.Response.StatusCode = 500;
     ctx.Response.ContentType = "application/json";
-    await ctx.Response.WriteAsJsonAsync(new { error = "An unexpected error occurred" });
+    var ex = ctx.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+    var message = ex?.Message ?? "An unexpected error occurred";
+    // InvalidOperationException = known domain error (e.g. EA not connected)
+    ctx.Response.StatusCode = ex is InvalidOperationException ? 503 : 500;
+    await ctx.Response.WriteAsJsonAsync(new { error = message });
 }));
 
 app.UseCors();

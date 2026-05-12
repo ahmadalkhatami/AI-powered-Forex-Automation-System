@@ -1,5 +1,6 @@
 using ForexAI.Domain.Interfaces;
 using ForexAI.Infrastructure.Persistence.Repositories;
+using ForexAI.Infrastructure.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -43,6 +44,10 @@ public class ForexApiFactory : WebApplicationFactory<Program>
                 new JsonTradePositionRepository(_positionsFile));
             services.AddScoped<ISignalRepository>(_ =>
                 new JsonSignalRepository(_signalsFile));
+
+            // Replace Yahoo Finance with stub so tests don't hit the internet
+            services.AddTransient<IMarketDataService, StubMarketDataService>();
+            services.AddTransient<ICandleDataService>(_ => new NullCandleDataService());
         });
     }
 

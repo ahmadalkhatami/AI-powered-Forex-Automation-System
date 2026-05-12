@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ForexAI.Domain.Entities;
 using ForexAI.Domain.Interfaces;
+using ForexAI.Domain.ValueObjects;
 using ForexAI.Infrastructure.Persistence.Dtos;
 
 namespace ForexAI.Infrastructure.Persistence.Repositories;
@@ -139,6 +140,28 @@ public class JsonTradePositionRepository : ITradePositionRepository
         var all = await LoadAllAsync();
         return all.Count(d =>
             string.Equals(d.Status, "ACTIVE", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public async Task<DailyRiskUsage> GetDailyRiskUsageAsync(DateTimeOffset asOfUtc)
+    {
+        var all = await LoadAllAsync();
+
+        // UTC day boundary: 00:00 UTC = 07:00 WIB. Trades dengan OpenedAt < dayStart
+        // dianggap "kemarin" dan tidak masuk hitungan.
+        var dayStart = new DateTimeOffset(asOfUtc.UtcDateTime.Date, TimeSpan.Zero);
+        var dayEnd   = dayStart.AddDays(1);
+
+        var today = all.Where(d =>
+            d.OpenedAt.HasValue                                         &&
+            d.OpenedAt.Value >= dayStart                                &&
+            d.OpenedAt.Value <  dayEnd                                  &&
+            !string.Equals(d.Status, "SKIPPED", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        decimal usedUsd = today.Sum(d => d.RiskAmount);
+        int     count   = today.Count;
+
+        return new DailyRiskUsage(usedUsd, count, asOfUtc);
     }
 
     private static string GetString(JsonElement el, string prop, string fallback = "")

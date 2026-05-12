@@ -9,5 +9,6 @@ public interface IRiskEvaluator
         TradeSignal signal,
         PredictorResult predictor,
         decimal equity,
-        int openPositions);
+        int openPositions,
+        DailyRiskUsage dailyUsage);
 }

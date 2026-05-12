@@ -226,16 +226,23 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         return (confluenceScore, Math.Round(confidenceScore, 2));
     }
 
-    // ── Trade Parameters — ATR-based Dynamic SL/TP ───────────────────────────
+    // ── Trade Parameters — ATR-based Dynamic SL/TP + Tier-aware Risk % ───────
     // SL = kSL × ATR(14)M15   →  market volatile: SL otomatis lebih lebar
     // TP = kTP × ATR(14)M15   →  R:R tetap konstan = kTP/kSL = 2.5/1.5 ≈ 1.67
+    //
+    // Risk per trade = tier.RiskPerTradePct × equity:
+    //   starter (<$100):  2.0%   ← modal kecil butuh % besar agar 0.01 lot viable
+    //   growth  (<$200):  1.5%
+    //   stable  (<$500):  1.0%   ← standar industri
+    //   scaled  (>$500):  1.0%
     //
     // Contoh ATR 12 pip:  SL = 1.5 × 12 = 18 pip,  TP = 2.5 × 12 = 30 pip
     // Contoh ATR 20 pip:  SL = 1.5 × 20 = 30 pip,  TP = 2.5 × 20 = 50 pip
     private static TradeParameters CalculateParameters(
         MarketSnapshot snap, SignalDirection signal, decimal equity)
     {
-        decimal riskAmount = Math.Round(equity * 0.01m, 2);  // 1% equity
+        var tier           = RiskTier.FromEquity(equity);
+        decimal riskAmount = Math.Round(equity * tier.RiskPerTradePct, 2);
         decimal entry      = snap.CurrentPrice;
         const decimal pipSize = 0.0001m;  // EURUSD: 1 pip = 0.0001
 

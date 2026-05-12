@@ -1,5 +1,6 @@
 using ForexAI.Domain.Enums;
 using ForexAI.Domain.Interfaces;
+using ForexAI.Domain.ValueObjects;
 using MediatR;
 
 namespace ForexAI.Application.UseCases.GetAccountHealth;
@@ -75,6 +76,12 @@ public class GetAccountHealthHandler : IRequestHandler<GetAccountHealthQuery, Ac
             ? Math.Max(0m, (peakEquity - equity) / peakEquity)
             : 0m;
 
+        // ── Tier-based risk + daily cap snapshot (Sprint 1 item 1) ──────────
+        var tier        = RiskTier.FromEquity(equity);
+        var dailyUsage  = await _positions.GetDailyRiskUsageAsync(DateTimeOffset.UtcNow);
+        var dailyCapUsd = equity * tier.DailyCapPct;
+        var utilization = dailyCapUsd > 0m ? dailyUsage.UsedUsd / dailyCapUsd : 0m;
+
         return new AccountHealthResult(
             Equity:        Math.Round(equity, 2),
             PeakEquity:    Math.Round(peakEquity, 2),
@@ -85,7 +92,15 @@ public class GetAccountHealthHandler : IRequestHandler<GetAccountHealthQuery, Ac
             MaxPositions:  MaxPositions,
             TotalTrades:   closed.Count,
             WinRate:       Math.Round(winRate, 4),
-            Source:        source
+            Source:        source,
+
+            RiskTier:            tier.Name,
+            RiskPerTradePct:     tier.RiskPerTradePct,
+            DailyCapPct:         tier.DailyCapPct,
+            MaxDailyTrades:      tier.MaxDailyTrades,
+            DailyRiskUsedUsd:    Math.Round(dailyUsage.UsedUsd, 2),
+            TradesOpenedToday:   dailyUsage.TradeCount,
+            DailyCapUtilization: Math.Round(utilization, 4)
         );
     }
 }

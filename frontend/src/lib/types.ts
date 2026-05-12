@@ -7,6 +7,15 @@ export interface AccountHealthData {
   totalTrades?: number
   winRate?: number        // 0.0–1.0
   source?: 'LIVE' | 'SIMULATION'   // LIVE = dari akun broker nyata
+
+  // Tier-based risk + daily cap (Sprint 1 item 1)
+  riskTier?: 'starter' | 'growth' | 'stable' | 'scaled'
+  riskPerTradePct?: number       // 0.020 = 2%
+  dailyCapPct?: number           // 0.060 = 6%
+  maxDailyTrades?: number        // 3 / 4 / 5
+  dailyRiskUsedUsd?: number      // total $ risk dipakai hari ini
+  tradesOpenedToday?: number     // jumlah trade dibuka hari ini
+  dailyCapUtilization?: number   // 0.0–1.0+ — >1 = cap terlewat
 }
 
 export interface CandleBar {
@@ -38,6 +47,15 @@ export interface AccountHealthResponse {
   totalTrades: number
   winRate: number
   source: 'LIVE' | 'SIMULATION'
+
+  // Tier-based risk + daily cap
+  riskTier: 'starter' | 'growth' | 'stable' | 'scaled'
+  riskPerTradePct: number
+  dailyCapPct: number
+  maxDailyTrades: number
+  dailyRiskUsedUsd: number
+  tradesOpenedToday: number
+  dailyCapUtilization: number
 }
 
 export interface PositionCardData {

@@ -185,6 +185,13 @@ export default function DashboardPage() {
         totalTrades: health.totalTrades,
         winRate: health.winRate,
         source: health.source,
+        riskTier: health.riskTier,
+        riskPerTradePct: health.riskPerTradePct,
+        dailyCapPct: health.dailyCapPct,
+        maxDailyTrades: health.maxDailyTrades,
+        dailyRiskUsedUsd: health.dailyRiskUsedUsd,
+        tradesOpenedToday: health.tradesOpenedToday,
+        dailyCapUtilization: health.dailyCapUtilization,
       })
     } catch {
       // keep previous value

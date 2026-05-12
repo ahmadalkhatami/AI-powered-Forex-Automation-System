@@ -11,8 +11,8 @@
 //|  4. Drag EA ke chart EURUSD.m,M15                               |
 //+------------------------------------------------------------------+
 #property copyright "ForexAI"
-#property version   "1.15"
-#property description "ForexAI price bridge + MA/RSI/SR indicators + order executor"
+#property version   "1.16"
+#property description "ForexAI price bridge + MA/RSI/ATR/SR indicators + order executor"
 
 //--- Input parameters
 input string   BackendUrl  = "http://127.0.0.1:5033";  // URL backend ForexAI
@@ -27,6 +27,7 @@ int g_ma50m15 = INVALID_HANDLE;
 int g_ma20h1  = INVALID_HANDLE;
 int g_ma50h1  = INVALID_HANDLE;
 int g_rsi14   = INVALID_HANDLE;
+int g_atr14   = INVALID_HANDLE;
 
 //--- State
 string   g_pendingCommandId = "";
@@ -52,16 +53,17 @@ int OnInit()
    g_ma20h1  = iMA(TradePair, PERIOD_H1,  20, 0, MODE_SMA, PRICE_CLOSE);
    g_ma50h1  = iMA(TradePair, PERIOD_H1,  50, 0, MODE_SMA, PRICE_CLOSE);
    g_rsi14   = iRSI(TradePair, PERIOD_M15, 14, PRICE_CLOSE);
+   g_atr14   = iATR(TradePair, PERIOD_M15, 14);
 
    if(g_ma20m15 == INVALID_HANDLE || g_ma50m15 == INVALID_HANDLE ||
       g_ma20h1  == INVALID_HANDLE || g_ma50h1  == INVALID_HANDLE ||
-      g_rsi14   == INVALID_HANDLE)
+      g_rsi14   == INVALID_HANDLE || g_atr14   == INVALID_HANDLE)
    {
       Print("[ForexAI] ERROR: Gagal membuat indicator handles — pastikan simbol tersedia");
       return INIT_FAILED;
    }
 
-   Print("[ForexAI] Indicator handles berhasil dibuat (MA20/MA50 M15+H1, RSI14)");
+   Print("[ForexAI] Indicator handles berhasil dibuat (MA20/MA50 M15+H1, RSI14, ATR14)");
 
    if(!EventSetMillisecondTimer(TimerMs))
    {
@@ -69,7 +71,7 @@ int OnInit()
       return INIT_FAILED;
    }
 
-   Print("[ForexAI] Bridge aktif v1.15 — pair: ", TradePair, " | backend: ", BackendUrl,
+   Print("[ForexAI] Bridge aktif v1.16 — pair: ", TradePair, " | backend: ", BackendUrl,
          " | balance: ", AccountInfoDouble(ACCOUNT_BALANCE),
          " | equity: ", AccountInfoDouble(ACCOUNT_EQUITY));
 
@@ -88,6 +90,7 @@ void OnDeinit(const int reason)
    if(g_ma20h1  != INVALID_HANDLE) IndicatorRelease(g_ma20h1);
    if(g_ma50h1  != INVALID_HANDLE) IndicatorRelease(g_ma50h1);
    if(g_rsi14   != INVALID_HANDLE) IndicatorRelease(g_rsi14);
+   if(g_atr14   != INVALID_HANDLE) IndicatorRelease(g_atr14);
 
    SendStatus("DISCONNECTED");
    Print("[ForexAI] Bridge berhenti.");
@@ -122,6 +125,7 @@ void SendLatestTick()
    double ma20m15_buf[1], ma50m15_buf[1];
    double ma20h1_buf[1],  ma50h1_buf[1];
    double rsi_buf[2];
+   double atr_buf[1];
 
    // CopyBuffer: index 0 = bar terbaru, index 1 = bar sebelumnya
    if(CopyBuffer(g_ma20m15, 0, 0, 1, ma20m15_buf) <= 0) return;
@@ -129,6 +133,7 @@ void SendLatestTick()
    if(CopyBuffer(g_ma20h1,  0, 0, 1, ma20h1_buf)  <= 0) return;
    if(CopyBuffer(g_ma50h1,  0, 0, 1, ma50h1_buf)  <= 0) return;
    if(CopyBuffer(g_rsi14,   0, 0, 2, rsi_buf)     < 2)  return;
+   if(CopyBuffer(g_atr14,   0, 0, 1, atr_buf)     <= 0) return;
 
    double ma20m15 = ma20m15_buf[0];
    double ma50m15 = ma50m15_buf[0];
@@ -136,6 +141,7 @@ void SendLatestTick()
    double ma50h1  = ma50h1_buf[0];
    double rsi14   = rsi_buf[0];
    int    rsiDir  = (rsi_buf[0] > rsi_buf[1]) ? 1 : 0;  // 1=rising, 0=falling
+   double atr14   = atr_buf[0];  // ATR(14) M15 dalam satuan harga (misal 0.00120 = 12 pip)
 
    // ── Support & Resistance: high/low tertinggi/terendah N bar M15 ─
    double highs[], lows[];
@@ -156,10 +162,11 @@ void SendLatestTick()
       "\"ma20m15\":%.5f,\"ma50m15\":%.5f,"
       "\"ma20h1\":%.5f,\"ma50h1\":%.5f,"
       "\"rsi14\":%.2f,\"rsiDir\":%d,"
+      "\"atr14\":%.5f,"
       "\"support\":%.5f,\"resistance\":%.5f}",
       TradePair, bid, ask, time, balance, equity,
       ma20m15, ma50m15, ma20h1, ma50h1,
-      rsi14, rsiDir, support, resistance);
+      rsi14, rsiDir, atr14, support, resistance);
 
    string headers = "Content-Type: application/json\r\n";
    char   body[], resp[];

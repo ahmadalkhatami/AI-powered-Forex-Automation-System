@@ -13,5 +13,6 @@ public record MarketSnapshot(
     string SupportZone,
     string ResistanceZone,
     string Session,
-    DateTimeOffset CapturedAt
+    DateTimeOffset CapturedAt,
+    decimal ATR14 = 0m   // ATR(14) M15 dalam satuan harga; 0 = tidak tersedia (fallback ke 15 pip)
 );

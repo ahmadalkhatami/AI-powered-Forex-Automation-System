@@ -153,14 +153,20 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         decimal range           = resistance - support;
         decimal pctFromSupport  = Math.Clamp((snap.CurrentPrice - support) / range, 0m, 1m);
 
-        // Score: tinggi kalau harga dekat support atau resistance (level kunci jelas)
+        // Score: semakin dekat ke level kunci (S/R) → semakin tinggi kualitas setup
+        // ≤10%: sangat dekat level → setup ideal (0.85)
+        // ≤20%: dekat level        → setup bagus  (0.80)
+        // ≤35%: agak dekat         → lumayan       (0.65)
+        // >35%: mid-range          → setup lemah   (0.40)
         decimal score;
         string position;
 
-        if      (pctFromSupport <= 0.20m) { score = 0.80m; position = "Near support";    }
-        else if (pctFromSupport >= 0.80m) { score = 0.80m; position = "Near resistance"; }
+        if      (pctFromSupport <= 0.10m || pctFromSupport >= 0.90m)
+                                          { score = 0.85m; position = "Sangat dekat level"; }
+        else if (pctFromSupport <= 0.20m || pctFromSupport >= 0.80m)
+                                          { score = 0.80m; position = "Near support/resistance"; }
         else if (pctFromSupport <= 0.35m || pctFromSupport >= 0.65m)
-                                          { score = 0.60m; position = "Mid-range";       }
+                                          { score = 0.65m; position = "Mid-range";       }
         else                              { score = 0.40m; position = "Mid-range";       }
 
         bool candleConfirmed = pctFromSupport <= 0.25m || pctFromSupport >= 0.75m;
@@ -220,49 +226,52 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         return (confluenceScore, Math.Round(confidenceScore, 2));
     }
 
-    // ── Trade Parameters (1% Risk Rule) ───────────────────────────────────────
+    // ── Trade Parameters — ATR-based Dynamic SL/TP ───────────────────────────
+    // SL = kSL × ATR(14)M15   →  market volatile: SL otomatis lebih lebar
+    // TP = kTP × ATR(14)M15   →  R:R tetap konstan = kTP/kSL = 2.5/1.5 ≈ 1.67
+    //
+    // Contoh ATR 12 pip:  SL = 1.5 × 12 = 18 pip,  TP = 2.5 × 12 = 30 pip
+    // Contoh ATR 20 pip:  SL = 1.5 × 20 = 30 pip,  TP = 2.5 × 20 = 50 pip
     private static TradeParameters CalculateParameters(
         MarketSnapshot snap, SignalDirection signal, decimal equity)
     {
         decimal riskAmount = Math.Round(equity * 0.01m, 2);  // 1% equity
         decimal entry      = snap.CurrentPrice;
+        const decimal pipSize = 0.0001m;  // EURUSD: 1 pip = 0.0001
 
-        decimal.TryParse(snap.SupportZone,    NumberStyles.Float, CultureInfo.InvariantCulture, out var support);
-        decimal.TryParse(snap.ResistanceZone, NumberStyles.Float, CultureInfo.InvariantCulture, out var resistance);
-        if (support    <= 0) support    = entry * 0.990m;
-        if (resistance <= 0) resistance = entry * 1.010m;
+        // ── ATR-based SL/TP ──────────────────────────────────────────────────
+        const decimal kSL = 1.5m;   // SL multiplier
+        const decimal kTP = 2.5m;   // TP multiplier  →  R:R = kTP/kSL = 1.67
+
+        // Fallback 15 pip jika ATR belum ada (simulasi / EA v1.15 lama)
+        decimal atrPips = snap.ATR14 > 0
+            ? Math.Round(snap.ATR14 / pipSize, 1)
+            : 15m;
+
+        int slPips = (int)Math.Clamp(Math.Round(kSL * atrPips), 8m, 80m);
+        int tpPips = (int)Math.Clamp(Math.Round(kTP * atrPips), slPips + 1m, 120m);
 
         decimal stopLoss, takeProfit;
-        int slPips, tpPips;
-
         if (signal == SignalDirection.BUY)
         {
-            // SL di bawah support, TP di resistance
-            var rawSl = Math.Max(entry - support, 0.0010m);
-            slPips    = (int)Math.Clamp(Math.Round(rawSl / 0.0001m), 10, 60);
-            tpPips    = (int)Math.Round(slPips * 1.8m);  // min R:R 1.8
-            stopLoss  = Math.Round(entry - slPips * 0.0001m, 5);
-            takeProfit = Math.Round(entry + tpPips * 0.0001m, 5);
+            stopLoss   = Math.Round(entry - slPips * pipSize, 5);
+            takeProfit = Math.Round(entry + tpPips * pipSize, 5);
         }
         else if (signal == SignalDirection.SELL)
         {
-            var rawSl = Math.Max(resistance - entry, 0.0010m);
-            slPips    = (int)Math.Clamp(Math.Round(rawSl / 0.0001m), 10, 60);
-            tpPips    = (int)Math.Round(slPips * 1.8m);
-            stopLoss  = Math.Round(entry + slPips * 0.0001m, 5);
-            takeProfit = Math.Round(entry - tpPips * 0.0001m, 5);
+            stopLoss   = Math.Round(entry + slPips * pipSize, 5);
+            takeProfit = Math.Round(entry - tpPips * pipSize, 5);
         }
-        else // HOLD — parameter default
+        else  // HOLD — tampilkan parameter simetris
         {
-            slPips    = 20; tpPips = 36;
-            stopLoss  = Math.Round(entry - 0.0020m, 5);
-            takeProfit = Math.Round(entry + 0.0036m, 5);
+            stopLoss   = Math.Round(entry - slPips * pipSize, 5);
+            takeProfit = Math.Round(entry + tpPips * pipSize, 5);
         }
 
         // Lot size = riskAmount / (slPips × $10/pip), minimum 0.01
-        decimal lotSize        = Math.Max(Math.Round(riskAmount / (slPips * 10m), 2), 0.01m);
+        decimal lotSize         = Math.Max(Math.Round(riskAmount / (slPips * 10m), 2), 0.01m);
         decimal potentialProfit = Math.Round(lotSize * tpPips * 10m, 2);
-        decimal riskReward     = slPips > 0 ? Math.Round((decimal)tpPips / slPips, 2) : 1.8m;
+        decimal riskReward      = slPips > 0 ? Math.Round((decimal)tpPips / slPips, 2) : (kTP / kSL);
 
         return new TradeParameters(
             Entry:           entry,

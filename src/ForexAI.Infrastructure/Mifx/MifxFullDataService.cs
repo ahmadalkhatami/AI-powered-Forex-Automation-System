@@ -32,13 +32,14 @@ public class MifxFullDataService : IMarketDataService
 
         if (!tick.HasIndicators)
             throw new InvalidOperationException(
-                "EA_UPDATE_REQUIRED: ForexAI_Bridge v1.15 belum di-compile. " +
+                "EA_UPDATE_REQUIRED: ForexAI_Bridge v1.16 belum di-compile. " +
                 "Buka MetaEditor di MT5 (F4), buka ForexAI_Bridge.mq5, tekan F7 untuk compile, " +
                 "lalu restart EA di chart.");
 
+        decimal atrPips = tick.ATR14.HasValue ? Math.Round(tick.ATR14.Value / 0.0001m, 1) : 0m;
         _logger.LogInformation(
-            "MT5 full data: {Pair} price={Price:F5} MA20M15={MA20:F5} RSI={RSI:F1} S={S:F5} R={R:F5}",
-            tick.Pair, tick.Mid, tick.MA20_M15, tick.RSI14, tick.Support, tick.Resistance);
+            "MT5 full data: {Pair} price={Price:F5} MA20M15={MA20:F5} RSI={RSI:F1} ATR={ATR:F1}pip S={S:F5} R={R:F5}",
+            tick.Pair, tick.Mid, tick.MA20_M15, tick.RSI14, atrPips, tick.Support, tick.Resistance);
 
         var snapshot = new MarketSnapshot(
             Pair:           pair,
@@ -53,7 +54,8 @@ public class MifxFullDataService : IMarketDataService
             SupportZone:    tick.Support?.ToString("F5", CultureInfo.InvariantCulture)    ?? "",
             ResistanceZone: tick.Resistance?.ToString("F5", CultureInfo.InvariantCulture) ?? "",
             Session:        DetectSession(tick.Time),
-            CapturedAt:     tick.Time);
+            CapturedAt:     tick.Time,
+            ATR14:          tick.ATR14 ?? 0m);
 
         return Task.FromResult(snapshot);
     }

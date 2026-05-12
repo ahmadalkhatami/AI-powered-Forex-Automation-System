@@ -20,6 +20,7 @@ public record MifxTickRequest(
     decimal? Ma50h1     = null,
     decimal? Rsi14      = null,
     int?     RsiDir     = null,       // 1=rising, 0=falling/flat
+    decimal? Atr14      = null,       // ATR(14) M15 dalam satuan harga (EA v1.16+)
     decimal? Support    = null,
     decimal? Resistance = null
 );
@@ -75,6 +76,7 @@ public class MifxBridgeController : ControllerBase
             MA50_H1:        req.Ma50h1,
             RSI14:          req.Rsi14,
             RSIDir:         req.RsiDir,
+            ATR14:          req.Atr14,
             Support:        req.Support,
             Resistance:     req.Resistance);
 

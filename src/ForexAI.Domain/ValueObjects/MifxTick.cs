@@ -14,6 +14,7 @@ public record MifxTick(
     decimal? MA50_H1     = null,
     decimal? RSI14       = null,
     int?     RSIDir      = null,   // 1=rising, 0=falling
+    decimal? ATR14       = null,   // ATR(14) M15 dalam satuan harga (EA v1.16+)
     decimal? Support     = null,
     decimal? Resistance  = null
 )
@@ -21,9 +22,9 @@ public record MifxTick(
     public decimal Mid    => Math.Round((Bid + Ask) / 2m, 5);
     public decimal Spread => Math.Round((Ask - Bid) * 10000m, 1); // in pips
 
-    /// <summary>True jika tick membawa data indikator lengkap (EA v1.15+)</summary>
+    /// <summary>True jika tick membawa data indikator lengkap (EA v1.16+)</summary>
     public bool HasIndicators =>
         MA20_M15.HasValue && MA50_M15.HasValue &&
         MA20_H1.HasValue  && MA50_H1.HasValue  &&
-        RSI14.HasValue;
+        RSI14.HasValue    && ATR14.HasValue;
 }

@@ -1,8 +1,8 @@
-# Panduan Pemasangan ForexAI Bridge EA di MetaTrader 5
+# Panduan Pemasangan ForexAI Bridge EA v1.19 di MetaTrader 5
 
 ## Langkah 1: Copy File EA ke MT5
 
-1. Buka aplikasi MetaTrader 5 (Exness).
+1. Buka aplikasi MetaTrader 5 (MIFX/Monex).
 2. Klik menu **File → Open Data Folder**.
 3. Di folder yang terbuka, navigasi ke: `MQL5 / Experts /`
 4. **Copy** file `ForexAI_Bridge.mq5` (dari folder `mt5_bridge/` di project ini) ke sana.
@@ -69,4 +69,4 @@ Tanpa langkah ini, EA tidak bisa berkomunikasi dengan C#.
 | "Cannot reach C# backend" | Pastikan `dotnet run` sudah berjalan di terminal |
 | "WebRequest is not allowed" | Ulangi Langkah 2 dan pastikan URL sudah ditambahkan |
 | Error `4014` di log | URL di Langkah 2 belum ditambahkan dengan benar |
-| Order tidak tereksekusi | Pastikan akun Exness Anda sudah login dan punya margin cukup |
+| Order/close order tidak tereksekusi | Pastikan akun MIFX sudah login, AutoTrading aktif, dan EA v1.19 sudah di-compile ulang |

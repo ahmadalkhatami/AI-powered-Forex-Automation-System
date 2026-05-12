@@ -63,5 +63,19 @@ public class PipelineIntegrationTests : IClassFixture<ForexApiFactory>
         var activePosition = await statusResp.Content.ReadFromJsonAsync<TradePositionDto>();
         Assert.NotNull(activePosition);
         Assert.Equal("ACTIVE", activePosition.Status);
+
+        // Step 5: Close simulation position and verify dashboard-facing state updates immediately
+        var closeResp = await _client.PostAsJsonAsync($"/api/position/{position.TradeId}/close",
+            new { outcome = "WIN", exitPrice = position.Entry + 0.0010m });
+        closeResp.EnsureSuccessStatusCode();
+        var closedPosition = await closeResp.Content.ReadFromJsonAsync<TradePositionDto>();
+        Assert.NotNull(closedPosition);
+        Assert.Equal("CLOSED_WIN", closedPosition.Status);
+
+        var allResp = await _client.GetAsync("/api/position");
+        allResp.EnsureSuccessStatusCode();
+        var allPositions = await allResp.Content.ReadFromJsonAsync<List<TradePositionDto>>();
+        Assert.Contains(allPositions ?? new List<TradePositionDto>(), p =>
+            p.TradeId == position.TradeId && p.Status == "CLOSED_WIN");
     }
 }

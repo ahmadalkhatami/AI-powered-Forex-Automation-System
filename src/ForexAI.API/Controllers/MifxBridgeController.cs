@@ -46,7 +46,7 @@ public record MifxStatusRequest(
 
 public record MifxOrderResultRequest(
     string CommandId,
-    string Status,     // "FILLED" | "FAILED" | "TIMEOUT"
+    string Status,     // "FILLED" | "CLOSED" | "FAILED" | "TIMEOUT"
     string? OrderId,
     decimal Price,
     int Retcode

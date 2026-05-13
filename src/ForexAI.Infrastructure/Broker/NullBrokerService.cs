@@ -11,8 +11,8 @@ public class NullBrokerService : IBrokerService
     public Task<BrokerAccountInfo> GetAccountAsync() =>
         Task.FromResult(new BrokerAccountInfo(0m, 0m, 0m));
 
-    public Task<string?> PlaceOrderAsync(BrokerOrderRequest request) =>
-        Task.FromResult<string?>(null);
+    public Task<BrokerOrderResult> PlaceOrderAsync(BrokerOrderRequest request) =>
+        Task.FromResult(BrokerOrderResult.Disconnected());
 
     public Task<BrokerExecutionResult> ClosePositionAsync(
         TradePosition position,

@@ -32,12 +32,12 @@ public class MifxBrokerService : IBrokerService
         return Task.FromResult(new BrokerAccountInfo(balance, equity, unrealizedPnl));
     }
 
-    public async Task<string?> PlaceOrderAsync(BrokerOrderRequest request)
+    public async Task<BrokerOrderResult> PlaceOrderAsync(BrokerOrderRequest request)
     {
         if (!_feed.IsConnected)
         {
             _logger.LogWarning("MIFX EA tidak terkoneksi — order dibatalkan");
-            return null;
+            return BrokerOrderResult.Disconnected();
         }
 
         var command = new MifxOrderCommand(
@@ -61,13 +61,19 @@ public class MifxBrokerService : IBrokerService
             _logger.LogInformation(
                 "Order TERISI di MIFX — orderId={OrderId} price={Price}",
                 result.OrderId, result.Price);
-            return $"MIFX-{result.OrderId}";
+            return BrokerOrderResult.Filled($"MIFX-{result.OrderId}");
+        }
+
+        if (result.Status == "TIMEOUT")
+        {
+            _logger.LogWarning("Order TIMEOUT — EA tidak respon dalam 30 detik");
+            return BrokerOrderResult.TimedOut();
         }
 
         _logger.LogWarning(
             "Order GAGAL — status={Status} retcode={Retcode}",
             result.Status, result.Retcode);
-        return null;
+        return BrokerOrderResult.Failed(result.Retcode);
     }
 
     public async Task<BrokerExecutionResult> ClosePositionAsync(

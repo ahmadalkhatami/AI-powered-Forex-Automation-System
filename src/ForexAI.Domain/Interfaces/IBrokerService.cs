@@ -7,6 +7,6 @@ public interface IBrokerService
 {
     bool IsLive { get; }
     Task<BrokerAccountInfo> GetAccountAsync();
-    Task<string?> PlaceOrderAsync(BrokerOrderRequest request);
+    Task<BrokerOrderResult> PlaceOrderAsync(BrokerOrderRequest request);
     Task<BrokerExecutionResult> ClosePositionAsync(TradePosition position, CancellationToken cancellationToken = default);
 }

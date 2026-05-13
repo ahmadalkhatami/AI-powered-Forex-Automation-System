@@ -107,12 +107,13 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
                 StopLoss: p.StopLoss,
                 TakeProfit: p.TakeProfit);
 
-            var externalId = await _broker.PlaceOrderAsync(orderReq);
+            var brokerResult = await _broker.PlaceOrderAsync(orderReq);
 
-            if (externalId == null)
+            if (!brokerResult.Success)
             {
-                var msg = "Broker order gagal atau timeout — EA tidak merespons";
-                _logger.LogWarning("Trade skipped: {Reason}", msg);
+                var msg = brokerResult.ErrorMessage ?? $"Broker rejected order ({brokerResult.StatusReason})";
+                _logger.LogWarning("Trade skipped: {Reason} (retcode={Code})",
+                    msg, brokerResult.BrokerRetcode);
                 var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
                 await _positions.SaveAsync(skipped);
                 return skipped;
@@ -131,11 +132,11 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
                 p.PotentialProfit,
                 p.RiskRewardRatio,
                 mode: "MIFX_DEMO",
-                externalTradeId: externalId);
+                externalTradeId: brokerResult.ExternalId);
 
             _logger.LogInformation(
                 "Trade OPEN [MIFX_DEMO] {TradeId} (ext:{ExternalId}) — {Direction} {Pair} @ {Entry}, SL {SL}, TP {TP}, lot {Lot}",
-                tradeId, externalId, signal.Signal, signal.Pair,
+                tradeId, brokerResult.ExternalId, signal.Signal, signal.Pair,
                 p.Entry, p.StopLoss, p.TakeProfit, p.LotSize);
         }
         else

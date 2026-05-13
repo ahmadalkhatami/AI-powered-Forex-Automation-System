@@ -289,10 +289,10 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             ? Math.Round(snap.ATR14 / pipSize, 1)
             : 15m;
 
-        // Minimum SL = 15 pips → broker MIFX/MT5 retail biasanya butuh stop level ≥ 10-15 pips
-        // (TRADE_RETCODE_INVALID_STOPS=10016 muncul jika SL terlalu dekat dengan harga).
+        // Minimum SL = 20 pips → MIFX EURUSD.m memiliki SYMBOL_TRADE_STOPS_LEVEL ≥ 20 pip.
+        // (TRADE_RETCODE_INVALID_STOPS=10016 muncul jika SL/TP terlalu dekat dari harga).
         // Minimum TP = SL × 1.5 agar R:R minimal 1.5 dan TP juga lolos broker stop level.
-        int slPips = (int)Math.Clamp(Math.Round(kSL * atrPips), 15m, 80m);
+        int slPips = (int)Math.Clamp(Math.Round(kSL * atrPips), 20m, 80m);
         int tpPips = (int)Math.Clamp(Math.Round(kTP * atrPips), Math.Max(slPips + 5m, slPips * 1.5m), 120m);
 
         decimal stopLoss, takeProfit;

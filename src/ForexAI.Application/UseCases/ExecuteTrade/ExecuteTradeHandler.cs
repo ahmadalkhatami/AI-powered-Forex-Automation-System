@@ -96,6 +96,18 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
             return skipped;
         }
 
+        // Guard: HOLD tidak punya arah trade yang valid → skip sebelum kirim ke broker.
+        // Jika dikirim ke broker, HOLD dianggap SELL (IsBuy=false) tapi SL/TP-nya
+        // dihitung sebagai BUY (SL di bawah entry) → MT5 retcode 10016.
+        if (signal.Signal == SignalDirection.HOLD)
+        {
+            var msg = "Signal HOLD — tidak ada arah trade yang dapat dieksekusi ke broker";
+            _logger.LogWarning("Trade skipped: {Reason}", msg);
+            var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
+            await _positions.SaveAsync(skipped);
+            return skipped;
+        }
+
         TradePosition position;
 
         if (_broker.IsLive)
@@ -106,6 +118,23 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
                 LotSize: p.LotSize,
                 StopLoss: p.StopLoss,
                 TakeProfit: p.TakeProfit);
+
+            // Validasi arah SL sebelum kirim (defensive check)
+            bool slOnWrongSide = signal.Signal == SignalDirection.BUY
+                ? p.StopLoss >= p.Entry
+                : p.StopLoss <= p.Entry;
+            if (slOnWrongSide)
+            {
+                var msg = $"SL {p.StopLoss:F5} ada di sisi salah untuk {signal.Signal} (entry {p.Entry:F5}) — dibatalkan sebelum kirim ke broker";
+                _logger.LogError("Trade aborted (invalid SL direction): {Reason}", msg);
+                var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
+                await _positions.SaveAsync(skipped);
+                return skipped;
+            }
+
+            _logger.LogInformation(
+                "Mengirim ke broker: {Dir} {Pair} entry={Entry} SL={SL}({SLpip}pip) TP={TP}({TPpip}pip) lot={Lot}",
+                signal.Signal, signal.Pair, p.Entry, p.StopLoss, p.StopLossPips, p.TakeProfit, p.TakeProfitPips, p.LotSize);
 
             var brokerResult = await _broker.PlaceOrderAsync(orderReq);
 

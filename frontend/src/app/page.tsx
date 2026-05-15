@@ -385,7 +385,7 @@ export default function DashboardPage() {
     toast({
       title: next ? '⚡ Auto-approve aktif' : '🛑 Auto-approve nonaktif',
       description: next
-        ? 'Signal dengan confidence ≥ 80% AND confluence ≥ 70 akan auto-execute'
+        ? 'Signal lolos vetos + confidence ≥ 70% akan auto-execute'
         : 'Kembali butuh klik Approve manual',
       variant: next ? 'default' : 'default',
     })
@@ -488,16 +488,17 @@ export default function DashboardPage() {
     }
   }, [rawSignal, riskValidation, mifxStatus, accountHealth, refreshPositions, refreshAccountHealth, toast])
 
-  // Auto-approve: dual gate — confidence ≥ 80% (konsensus) AND confluence ≥ 70 (kualitas)
-  // Dual gate fix kasus "high confidence + mediocre signal" yang sebelumnya lolos.
+  // Auto-approve: confidence ≥ 70% (single gate, data-driven).
+  // Backtest 200 candle M15 menunjukkan vetos (structure/RSI/overextension) sudah jadi
+  // quality gate utama — filter tambahan justru buang win-win. Threshold 70% adalah
+  // sanity floor (di atas median consensus 50-65% untuk mediocre setups).
   useEffect(() => {
     if (!autoApprove) return
     if (!rawSignal || !riskValidation) return
     if (autoApprovedSignalIdRef.current === rawSignal.id) return
     if (riskValidation.decision === 'NO-GO') return
     if (rawSignal.signal !== 'BUY' && rawSignal.signal !== 'SELL') return
-    if (rawSignal.confidenceScore < 0.80) return
-    if (rawSignal.confluenceScore < 70) return
+    if (rawSignal.confidenceScore < 0.70) return
     if (pageState === 'processing' || pageState === 'monitoring') return
     if (positions.some((p) => p.status === 'ACTIVE')) return
 
@@ -505,7 +506,7 @@ export default function DashboardPage() {
     const conf = (rawSignal.confidenceScore * 100).toFixed(0)
     toast({
       title: '🤖 Auto-approve fire',
-      description: `${rawSignal.signal} ${rawSignal.pair} · Confidence ${conf}% & Confluence ${rawSignal.confluenceScore} ≥ thresholds — eksekusi otomatis`,
+      description: `${rawSignal.signal} ${rawSignal.pair} · Confidence ${conf}% ≥ 70% + vetos passed — eksekusi otomatis`,
     })
     handleApprove()
   }, [autoApprove, rawSignal, riskValidation, pageState, positions, handleApprove, toast])
@@ -732,11 +733,11 @@ export default function DashboardPage() {
               onClick={toggleAutoApprove}
               className={cn('gap-2', autoApprove && 'border-amber-500/60 text-amber-600 dark:text-amber-400')}
               title={autoApprove
-                ? 'Auto-execute aktif: confidence ≥ 80% AND confluence ≥ 70'
-                : 'Klik untuk aktifkan auto-execute (dual gate)'}
+                ? 'Auto-execute aktif: vetos passed + confidence ≥ 70%'
+                : 'Klik untuk aktifkan auto-execute'}
             >
               {autoApprove ? <Zap className="h-3.5 w-3.5" /> : <ZapOff className="h-3.5 w-3.5" />}
-              {autoApprove ? 'Exec ON' : 'Exec OFF'}
+              {autoApprove ? 'Exec ≥70%' : 'Exec OFF'}
             </Button>
             <Button
               variant="outline"

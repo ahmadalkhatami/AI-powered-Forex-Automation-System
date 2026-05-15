@@ -46,6 +46,10 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         // ── 4b. Regime filter — override sinyal jika market sideway ────────
         signal = ApplyRegimeFilter(signal, snap, structure);
 
+        // ── 4c. Setup vetos — accuracy filters berdasarkan analisa post-mortem 2 LOSS trade ─
+        var (vetoSignal, vetoReasons) = ApplySetupVetos(signal, snap, momentum, pctFromSupport);
+        signal = vetoSignal;
+
         // ── 5. Scores ───────────────────────────────────────────────────────
         var (confluenceScore, confidenceScore) = CalculateScores(trend, momentum, structure, signal, snap.Regime);
 
@@ -54,6 +58,7 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
 
         // ── 7. Warnings ─────────────────────────────────────────────────────
         var warnings = BuildWarnings(snap, signal, confidenceScore, trend, momentum);
+        foreach (var v in vetoReasons) warnings.Add(v);
 
         return new TradeSignal(
             runId:           Guid.NewGuid().ToString("N")[..12],
@@ -221,6 +226,59 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
 
         // Ranging + mid-range → tidak ada setup yang layak
         return SignalDirection.HOLD;
+    }
+
+    // ── Setup Vetos — block trade pada kondisi reversal/overextension ────────
+    // Lessons learned dari 2 LOSS trade 2026-05-15: SELL near support + RSI 36 = bounce trap.
+    // Vetos: structure mismatch, RSI extreme, overextension dari MA.
+    private static (SignalDirection result, List<string> reasons) ApplySetupVetos(
+        SignalDirection signal, MarketSnapshot snap, MomentumAnalysis momentum, decimal pctFromSupport)
+    {
+        var reasons = new List<string>();
+        if (signal == SignalDirection.HOLD) return (signal, reasons);
+
+        // VETO 1 — Structure mismatch: SELL near support / BUY near resistance
+        // Price < 25% dari S→R range = sangat dekat support (bounce risk untuk SELL)
+        // Price > 75% dari S→R range = sangat dekat resistance (rejection risk untuk BUY)
+        if (signal == SignalDirection.SELL && pctFromSupport <= 0.25m)
+        {
+            reasons.Add($"VETO: SELL di-override ke HOLD — price {pctFromSupport:P0} dari range terlalu dekat SUPPORT, risiko bounce.");
+            return (SignalDirection.HOLD, reasons);
+        }
+        if (signal == SignalDirection.BUY && pctFromSupport >= 0.75m)
+        {
+            reasons.Add($"VETO: BUY di-override ke HOLD — price {pctFromSupport:P0} dari range terlalu dekat RESISTANCE, risiko rejection.");
+            return (SignalDirection.HOLD, reasons);
+        }
+
+        // VETO 2 — RSI extreme: SELL saat oversold / BUY saat overbought
+        if (signal == SignalDirection.SELL && momentum.RSIValue <= 35m)
+        {
+            reasons.Add($"VETO: SELL di-override ke HOLD — RSI {momentum.RSIValue:F1} ≤ 35 (oversold), risiko reversal.");
+            return (SignalDirection.HOLD, reasons);
+        }
+        if (signal == SignalDirection.BUY && momentum.RSIValue >= 65m)
+        {
+            reasons.Add($"VETO: BUY di-override ke HOLD — RSI {momentum.RSIValue:F1} ≥ 65 (overbought), risiko reversal.");
+            return (SignalDirection.HOLD, reasons);
+        }
+
+        // VETO 3 — Overextension dari MA20 M15 (>2 × ATR)
+        // Mencegah entry di tail-end momentum, mean-reversion lebih mungkin terjadi.
+        if (snap.ATR14 > 0m)
+        {
+            decimal distFromMa20 = Math.Abs(snap.CurrentPrice - snap.MA20_M15);
+            decimal threshold    = 2m * snap.ATR14;
+            if (distFromMa20 > threshold)
+            {
+                decimal distPips     = Math.Round(distFromMa20 / 0.0001m, 1);
+                decimal thresholdPips = Math.Round(threshold / 0.0001m, 1);
+                reasons.Add($"VETO: {signal} di-override ke HOLD — price {distPips}p dari MA20 (>{thresholdPips}p = 2×ATR), overextended.");
+                return (SignalDirection.HOLD, reasons);
+            }
+        }
+
+        return (signal, reasons);
     }
 
     // ── Confluence & Confidence Scores ────────────────────────────────────────

@@ -29,10 +29,10 @@ function dailyCapColor(utilization: number): TremorColor {
 }
 
 const TIER_LABEL: Record<string, string> = {
-  starter: '$0-100 · 2%/trade · 6%/day · max 3',
-  growth:  '$100-200 · 1.5%/trade · 6%/day · max 4',
-  stable:  '$200-500 · 1%/trade · 5%/day · max 5',
-  scaled:  '>$500 · 1%/trade · 4%/day · max 5',
+  starter: '$0-100 · 2%/trade · 14%/day · max 7',
+  growth:  '$100-200 · 1.5%/trade · 11%/day · max 7',
+  stable:  '$200-500 · 1%/trade · 7%/day · max 7',
+  scaled:  '>$500 · 1%/trade · 7%/day · max 7',
 }
 
 interface AccountHealthBarProps {

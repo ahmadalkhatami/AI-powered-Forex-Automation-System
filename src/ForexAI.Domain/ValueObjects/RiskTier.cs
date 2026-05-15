@@ -14,10 +14,11 @@ public record RiskTier(
     decimal DailyCapPct,         // 0.060 = 6% equity total exposure per hari
     int     MaxDailyTrades)      // jumlah trade max per hari (UTC day)
 {
-    public static readonly RiskTier Starter = new("starter",   0m, 0.020m, 0.060m, 3);
-    public static readonly RiskTier Growth  = new("growth", 100m, 0.015m, 0.060m, 4);
-    public static readonly RiskTier Stable  = new("stable", 200m, 0.010m, 0.050m, 5);
-    public static readonly RiskTier Scaled  = new("scaled", 500m, 0.010m, 0.040m, 5);
+    // Cap = RiskPerTrade × MaxDailyTrades — agar 7 trade berturut-turut lolos sebelum cap memblok.
+    public static readonly RiskTier Starter = new("starter",   0m, 0.020m, 0.140m, 7);
+    public static readonly RiskTier Growth  = new("growth", 100m, 0.015m, 0.110m, 7);
+    public static readonly RiskTier Stable  = new("stable", 200m, 0.010m, 0.070m, 7);
+    public static readonly RiskTier Scaled  = new("scaled", 500m, 0.010m, 0.070m, 7);
 
     public static RiskTier FromEquity(decimal equity)
     {

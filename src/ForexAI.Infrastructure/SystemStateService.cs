@@ -19,6 +19,7 @@ public class SystemStateService : ISystemStateService
 
     public decimal MaxSpreadPips { get; private set; } = 2.5m;
     public int MaxConsecutiveLosses { get; private set; } = 3;
+    public int MaxHoldingMinutes { get; private set; } = 360;  // 6 jam (M15: 24 bars)
 
     private readonly string _persistPath;
     private readonly object _lock = new();
@@ -57,13 +58,14 @@ public class SystemStateService : ISystemStateService
         string? HaltReason,
         DateTimeOffset? HaltedAt,
         decimal MaxSpreadPips,
-        int MaxConsecutiveLosses);
+        int MaxConsecutiveLosses,
+        int MaxHoldingMinutes = 360);
 
     private void Save_NoLock()
     {
         try
         {
-            var snap = new Snapshot(IsHalted, HaltReason, HaltedAt, MaxSpreadPips, MaxConsecutiveLosses);
+            var snap = new Snapshot(IsHalted, HaltReason, HaltedAt, MaxSpreadPips, MaxConsecutiveLosses, MaxHoldingMinutes);
             var json = JsonSerializer.Serialize(snap, new JsonSerializerOptions { WriteIndented = true });
             var tmp  = _persistPath + ".tmp";
             File.WriteAllText(tmp, json);
@@ -86,6 +88,7 @@ public class SystemStateService : ISystemStateService
                 HaltedAt             = snap.HaltedAt;
                 MaxSpreadPips        = snap.MaxSpreadPips > 0 ? snap.MaxSpreadPips : 2.5m;
                 MaxConsecutiveLosses = snap.MaxConsecutiveLosses > 0 ? snap.MaxConsecutiveLosses : 3;
+                MaxHoldingMinutes    = snap.MaxHoldingMinutes > 0 ? snap.MaxHoldingMinutes : 360;
             }
         }
         catch { /* corrupt — ignore */ }

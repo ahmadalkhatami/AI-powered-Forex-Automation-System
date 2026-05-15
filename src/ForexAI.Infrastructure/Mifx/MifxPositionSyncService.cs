@@ -17,14 +17,20 @@ namespace ForexAI.Infrastructure.Mifx;
 public class MifxPositionSyncService
 {
     private readonly ITradePositionRepository _repo;
+    private readonly ISystemStateService _systemState;
+    private readonly IBrokerService _broker;
     private readonly ILogger<MifxPositionSyncService> _logger;
 
     public MifxPositionSyncService(
         ITradePositionRepository repo,
+        ISystemStateService systemState,
+        IBrokerService broker,
         ILogger<MifxPositionSyncService> logger)
     {
-        _repo   = repo;
-        _logger = logger;
+        _repo        = repo;
+        _systemState = systemState;
+        _broker      = broker;
+        _logger      = logger;
     }
 
     /// <param name="brokerPositions">
@@ -55,6 +61,20 @@ public class MifxPositionSyncService
                 // Masih open di MT5 — update floating PnL dari nilai broker langsung
                 local.UpdatePnlFromBroker(bp.Profit, bp.Pips);
                 toUpdate.Add(local);
+
+                // Time stop — auto-close kalau posisi held > MaxHoldingMinutes
+                if (_systemState.MaxHoldingMinutes > 0 && local.OpenedAt.HasValue)
+                {
+                    var ageMinutes = (DateTimeOffset.UtcNow - local.OpenedAt.Value).TotalMinutes;
+                    if (ageMinutes >= _systemState.MaxHoldingMinutes)
+                    {
+                        _logger.LogWarning(
+                            "Time stop fire: {Id} held {Age:F0} min ≥ {Max} min — close otomatis",
+                            local.TradeId, ageMinutes, _systemState.MaxHoldingMinutes);
+                        // Fire-and-forget close — actual close akan di-detect di sync berikutnya
+                        _ = _broker.ClosePositionAsync(local);
+                    }
+                }
             }
             else
             {

@@ -11,6 +11,7 @@ public interface ISystemStateService
     DateTimeOffset?  HaltedAt             { get; }
     decimal          MaxSpreadPips        { get; }
     int              MaxConsecutiveLosses { get; }
+    int              MaxHoldingMinutes    { get; }    // 0 = disabled
 
     void Halt(string reason);
     void Resume();

@@ -25,3 +25,7 @@ _bmad-output/planning-artifacts/*.html
 
 # macOS
 .DS_Store
+
+# Audit log (rotating, runtime)
+_bmad-output/implementation-artifacts/audit-log.jsonl
+_bmad-output/implementation-artifacts/system-state.json

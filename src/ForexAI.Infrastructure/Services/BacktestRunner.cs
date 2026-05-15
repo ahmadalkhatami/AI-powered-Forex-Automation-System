@@ -13,7 +13,8 @@ public record BacktestParams(
     string  Timeframe        = "M15",
     decimal StartingEquity   = 1000m,
     int     MaxBarsPerTrade  = 96,        // 1 day untuk M15
-    decimal MinConfidence    = 0m,        // 0 = terima semua kecuali HOLD
+    decimal MinConfidence    = 0m,        // 0–1 — konsensus indikator (consistency)
+    int     MinConfluence    = 0,         // 0–100 — kualitas weighted score (strength)
     bool    BlockHold        = true);     // Skip signals HOLD
 
 public record BacktestTrade(
@@ -101,6 +102,7 @@ public class BacktestRunner
 
             if (p.BlockHold && signal.Signal == SignalDirection.HOLD) continue;
             if (signal.ConfidenceScore < p.MinConfidence) continue;
+            if (signal.ConfluenceScore < p.MinConfluence) continue;
             if (signal.Signal != SignalDirection.BUY && signal.Signal != SignalDirection.SELL) continue;
 
             // Fill di open bar berikutnya

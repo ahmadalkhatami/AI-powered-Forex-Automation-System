@@ -9,6 +9,7 @@ public record BacktestRunRequest(
     decimal StartingEquity   = 1000m,
     int     MaxBarsPerTrade  = 96,
     decimal MinConfidence    = 0m,
+    int     MinConfluence    = 0,
     bool    BlockHold        = true);
 
 [ApiController]
@@ -28,6 +29,7 @@ public class BacktestController : ControllerBase
             StartingEquity:  req.StartingEquity,
             MaxBarsPerTrade: req.MaxBarsPerTrade,
             MinConfidence:   req.MinConfidence,
+            MinConfluence:   req.MinConfluence,
             BlockHold:       req.BlockHold));
         return Ok(result);
     }

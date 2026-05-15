@@ -120,6 +120,7 @@ export default function BacktestPage() {
   const [timeframe, setTimeframe] = useState<ChartTimeframe>('M15')
   const [startingEquity, setStartingEquity] = useState(1000)
   const [minConfidence, setMinConfidence] = useState(0.6)
+  const [minConfluence, setMinConfluence] = useState(70)
   const [maxBarsPerTrade, setMaxBarsPerTrade] = useState(96)
   const [blockHold, setBlockHold] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -136,6 +137,7 @@ export default function BacktestPage() {
         startingEquity,
         maxBarsPerTrade,
         minConfidence,
+        minConfluence,
         blockHold,
       })
       setResult(r)
@@ -199,7 +201,7 @@ export default function BacktestPage() {
           </div>
           <div className="space-y-1">
             <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              Min Confidence: {(minConfidence * 100).toFixed(0)}%
+              Min Confidence (konsensus): {(minConfidence * 100).toFixed(0)}%
             </label>
             <input
               type="range"
@@ -210,6 +212,26 @@ export default function BacktestPage() {
               onChange={(e) => setMinConfidence(Number(e.target.value))}
               className="w-full"
             />
+            <p className="text-[10px] text-muted-foreground/70 italic">
+              Seberapa setuju indikator (low stddev). 60% default.
+            </p>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Min Confluence (kualitas): {minConfluence}
+            </label>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="5"
+              value={minConfluence}
+              onChange={(e) => setMinConfluence(Number(e.target.value))}
+              className="w-full"
+            />
+            <p className="text-[10px] text-muted-foreground/70 italic">
+              Kualitas weighted score (trend×0.4 + momentum×0.35 + struct×0.25). 70 = setup kuat.
+            </p>
           </div>
           <div className="space-y-1">
             <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Max Bars per Trade</label>

@@ -96,7 +96,8 @@ export interface BacktestRunRequest {
   timeframe: ChartTimeframe
   startingEquity: number
   maxBarsPerTrade: number
-  minConfidence: number  // 0.0–1.0
+  minConfidence: number   // 0.0–1.0 — konsensus indikator
+  minConfluence: number   // 0–100 — kualitas weighted score
   blockHold: boolean
 }
 

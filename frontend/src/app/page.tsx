@@ -385,7 +385,7 @@ export default function DashboardPage() {
     toast({
       title: next ? '⚡ Auto-approve aktif' : '🛑 Auto-approve nonaktif',
       description: next
-        ? 'Signal dengan confidence ≥ 80% akan auto-execute tanpa konfirmasi'
+        ? 'Signal dengan confidence ≥ 80% AND confluence ≥ 70 akan auto-execute'
         : 'Kembali butuh klik Approve manual',
       variant: next ? 'default' : 'default',
     })
@@ -488,7 +488,8 @@ export default function DashboardPage() {
     }
   }, [rawSignal, riskValidation, mifxStatus, accountHealth, refreshPositions, refreshAccountHealth, toast])
 
-  // Auto-approve: signal BUY/SELL dengan confidence ≥ 80% dan decision GO/GO_WITH_CAUTION → eksekusi otomatis
+  // Auto-approve: dual gate — confidence ≥ 80% (konsensus) AND confluence ≥ 70 (kualitas)
+  // Dual gate fix kasus "high confidence + mediocre signal" yang sebelumnya lolos.
   useEffect(() => {
     if (!autoApprove) return
     if (!rawSignal || !riskValidation) return
@@ -496,6 +497,7 @@ export default function DashboardPage() {
     if (riskValidation.decision === 'NO-GO') return
     if (rawSignal.signal !== 'BUY' && rawSignal.signal !== 'SELL') return
     if (rawSignal.confidenceScore < 0.80) return
+    if (rawSignal.confluenceScore < 70) return
     if (pageState === 'processing' || pageState === 'monitoring') return
     if (positions.some((p) => p.status === 'ACTIVE')) return
 
@@ -503,7 +505,7 @@ export default function DashboardPage() {
     const conf = (rawSignal.confidenceScore * 100).toFixed(0)
     toast({
       title: '🤖 Auto-approve fire',
-      description: `${rawSignal.signal} ${rawSignal.pair} · Confidence ${conf}% ≥ 80% — eksekusi otomatis`,
+      description: `${rawSignal.signal} ${rawSignal.pair} · Confidence ${conf}% & Confluence ${rawSignal.confluenceScore} ≥ thresholds — eksekusi otomatis`,
     })
     handleApprove()
   }, [autoApprove, rawSignal, riskValidation, pageState, positions, handleApprove, toast])
@@ -730,11 +732,11 @@ export default function DashboardPage() {
               onClick={toggleAutoApprove}
               className={cn('gap-2', autoApprove && 'border-amber-500/60 text-amber-600 dark:text-amber-400')}
               title={autoApprove
-                ? 'Auto-execute aktif: trade otomatis saat confidence ≥ 80%'
-                : 'Klik untuk aktifkan auto-execute (≥80% confidence)'}
+                ? 'Auto-execute aktif: confidence ≥ 80% AND confluence ≥ 70'
+                : 'Klik untuk aktifkan auto-execute (dual gate)'}
             >
               {autoApprove ? <Zap className="h-3.5 w-3.5" /> : <ZapOff className="h-3.5 w-3.5" />}
-              {autoApprove ? 'Exec ≥80%' : 'Exec OFF'}
+              {autoApprove ? 'Exec ON' : 'Exec OFF'}
             </Button>
             <Button
               variant="outline"

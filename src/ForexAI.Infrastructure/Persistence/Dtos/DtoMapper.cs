@@ -78,12 +78,17 @@ internal static class DtoMapper
         SnapshotMA50_M15 = s.Snapshot.MA50_M15,
         SnapshotMA20_H1 = s.Snapshot.MA20_H1,
         SnapshotMA50_H1 = s.Snapshot.MA50_H1,
+        SnapshotMA20_D1 = s.Snapshot.MA20_D1,
+        SnapshotMA50_D1 = s.Snapshot.MA50_D1,
         SnapshotRSI14 = s.Snapshot.RSI14,
         SnapshotRSIDirection = s.Snapshot.RSIDirection,
         SnapshotSupportZone = s.Snapshot.SupportZone,
         SnapshotResistanceZone = s.Snapshot.ResistanceZone,
         SnapshotSession = s.Snapshot.Session,
         SnapshotCapturedAt = s.Snapshot.CapturedAt,
+        SnapshotATR14 = s.Snapshot.ATR14,
+        SnapshotADX14 = s.Snapshot.ADX14,
+        SnapshotRegime = s.Snapshot.Regime,
 
         TrendBias = s.Trend.Bias,
         TrendStrength = s.Trend.Strength,
@@ -129,7 +134,10 @@ internal static class DtoMapper
             dto.SnapshotMA20_H1, dto.SnapshotMA50_H1,
             dto.SnapshotRSI14, dto.SnapshotRSIDirection,
             dto.SnapshotSupportZone, dto.SnapshotResistanceZone,
-            dto.SnapshotSession, dto.SnapshotCapturedAt);
+            dto.SnapshotSession, dto.SnapshotCapturedAt,
+            dto.SnapshotATR14, dto.SnapshotADX14,
+            string.IsNullOrEmpty(dto.SnapshotRegime) ? "Unknown" : dto.SnapshotRegime,
+            dto.SnapshotMA20_D1, dto.SnapshotMA50_D1);
 
         var trend = new TrendAnalysis(
             dto.TrendBias, dto.TrendStrength,

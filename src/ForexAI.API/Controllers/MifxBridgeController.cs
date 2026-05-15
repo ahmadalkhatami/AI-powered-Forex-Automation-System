@@ -90,6 +90,7 @@ public class MifxBridgeController : ControllerBase
     private readonly MifxCommandQueue         _queue;
     private readonly MifxPositionSyncService  _syncService;
     private readonly ITradePositionRepository _positionRepo;
+    private readonly ISystemStateService      _systemState;
     private readonly IHubContext<DashboardHub> _hub;
     private readonly IMediator                _mediator;
     private readonly ILogger<MifxBridgeController> _logger;
@@ -100,6 +101,7 @@ public class MifxBridgeController : ControllerBase
         MifxCommandQueue queue,
         MifxPositionSyncService syncService,
         ITradePositionRepository positionRepo,
+        ISystemStateService systemState,
         IHubContext<DashboardHub> hub,
         IMediator mediator,
         ILogger<MifxBridgeController> logger)
@@ -109,6 +111,7 @@ public class MifxBridgeController : ControllerBase
         _queue        = queue;
         _syncService  = syncService;
         _positionRepo = positionRepo;
+        _systemState  = systemState;
         _hub          = hub;
         _mediator     = mediator;
         _logger       = logger;
@@ -193,6 +196,15 @@ public class MifxBridgeController : ControllerBase
         var closedAt = DateTimeOffset.FromUnixTimeSeconds(req.CloseTime);
         position.ClosedByBrokerWithProfit(req.NetProfit, req.ClosePrice, closedAt);
         await _positionRepo.SaveAsync(position);
+
+        // Post-loss cooldown: register direction yang baru saja LOSS
+        if (position.Status == Domain.Enums.TradeStatus.CLOSED_LOSS)
+        {
+            _systemState.RegisterLoss(position.Direction);
+            _logger.LogWarning(
+                "Cooldown ARMED: {Dir} di-block selama {Min} menit setelah LOSS",
+                position.Direction, _systemState.CooldownMinutes);
+        }
 
         _logger.LogInformation(
             "Position {Id} ({Pair} {Dir}) closed dengan ACTUAL profit ${Net:F2} " +

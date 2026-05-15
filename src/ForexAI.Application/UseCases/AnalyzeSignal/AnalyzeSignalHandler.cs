@@ -31,7 +31,25 @@ public class AnalyzeSignalHandler : IRequestHandler<AnalyzeSignalCommand, TradeS
         var snapshot = await _marketData.GetSnapshotAsync(request.Pair, request.Timeframe);
         var signal = await _analyzer.AnalyzeAsync(snapshot);
 
-        await _signals.SaveAsync(signal);
+        // Dedup: skip persist jika last signal (≤ 60 detik) punya pair+direction+conf+confluence yang sama.
+        // Live data menunjukkan 47% sinyal duplikat dari rapid-click / auto-trigger.
+        var last = await _signals.GetLatestAsync(signal.Pair);
+        bool isDuplicate =
+            last is not null
+            && last.Signal == signal.Signal
+            && last.ConfluenceScore == signal.ConfluenceScore
+            && Math.Abs(last.ConfidenceScore - signal.ConfidenceScore) < 0.01m
+            && (signal.Timestamp - last.Timestamp).TotalSeconds <= 60;
+
+        if (isDuplicate)
+        {
+            _logger.LogInformation("Skipping duplicate signal save (same as last within 60s): {Signal} conf={Confidence:P0}",
+                signal.Signal, signal.ConfidenceScore);
+        }
+        else
+        {
+            await _signals.SaveAsync(signal);
+        }
 
         _logger.LogInformation("Signal generated: {Signal} with confidence {Confidence:P0} for {Pair}",
             signal.Signal, signal.ConfidenceScore, signal.Pair);

@@ -5,10 +5,10 @@ import type { PositionCardData } from '@/lib/types'
 interface PositionsListProps {
   positions: PositionCardData[] | null
   currentPrice?: number
-  onClosePosition?: (tradeId: string, outcome: 'WIN' | 'LOSS', exitPrice: number) => Promise<void>
+  onCloseMarket?: (tradeId: string) => Promise<void>
 }
 
-export function PositionsList({ positions, currentPrice, onClosePosition }: PositionsListProps) {
+export function PositionsList({ positions, currentPrice, onCloseMarket }: PositionsListProps) {
   const active = positions?.filter((p) => p.status === 'ACTIVE') ?? []
   const closed = positions?.filter((p) => p.status !== 'ACTIVE') ?? []
 
@@ -34,7 +34,7 @@ export function PositionsList({ positions, currentPrice, onClosePosition }: Posi
               key={position.tradeId}
               position={position}
               currentPrice={currentPrice}
-              onClose={onClosePosition}
+              onCloseMarket={onCloseMarket}
             />
           ))}
         </>

@@ -115,6 +115,12 @@ export async function closePosition(
   })
 }
 
+// One-click close: backend auto-detect outcome dari floating PnL + pakai harga MIFX terbaru.
+// Untuk live mode, broker close otomatis dijalankan oleh ClosePositionHandler.
+export async function closePositionMarket(tradeId: string): Promise<TradePositionResponse> {
+  return fetchApi(`/api/position/${tradeId}/close-market`, { method: 'POST' })
+}
+
 // ── System control (kill switch) ────────────────────────────────────────
 export async function getSystemState(): Promise<SystemState> {
   return fetchApi('/api/system/state')

@@ -30,6 +30,7 @@ public record BacktestTrade(
     decimal  Pnl,
     int      Pips,
     decimal  Confidence,
+    int      Confluence,        // 0-100, quality weighted score
     int      BarsHeld);
 
 public record EquityPoint(long Time, decimal Equity);
@@ -83,8 +84,10 @@ public class BacktestRunner
                 $"Tidak cukup candle untuk backtest: {candles.Count} (butuh ≥ 51 untuk warmup MA50). " +
                 $"Pastikan EA push candle untuk {p.Pair} {p.Timeframe} dulu.");
 
-        var brokerStub = new BacktestBrokerStub(p.StartingEquity);
-        var analyzer   = new LiveSignalAnalyzer(brokerStub);
+        var brokerStub  = new BacktestBrokerStub(p.StartingEquity);
+        // Stub sistem state: cooldown disabled untuk backtest (kita backtest fresh tanpa loss history).
+        var stateStub   = new BacktestSystemStateStub();
+        var analyzer    = new LiveSignalAnalyzer(brokerStub, stateStub);
 
         var trades        = new List<BacktestTrade>();
         var equityCurve   = new List<EquityPoint> { new(candles[50].Time, p.StartingEquity) };
@@ -148,6 +151,7 @@ public class BacktestRunner
                 Pnl:        pnl,
                 Pips:       pips,
                 Confidence: signal.ConfidenceScore,
+                Confluence: signal.ConfluenceScore,
                 BarsHeld:   exit.BarsHeld));
 
             equity += pnl;
@@ -332,4 +336,26 @@ internal class BacktestBrokerStub : IBrokerService
         => throw new NotSupportedException("Backtest mode — no real orders");
     public Task<BrokerExecutionResult> ClosePositionAsync(TradePosition position, CancellationToken ct = default)
         => throw new NotSupportedException("Backtest mode — no real closes");
+}
+
+/// <summary>
+/// ISystemStateService stub untuk backtest — selalu non-halt + cooldown disabled.
+/// Tujuan: backtest harness uji analyzer dalam isolasi, tanpa kontaminasi state runtime production.
+/// </summary>
+internal class BacktestSystemStateStub : ISystemStateService
+{
+    public bool IsHalted => false;
+    public string? HaltReason => null;
+    public DateTimeOffset? HaltedAt => null;
+    public decimal MaxSpreadPips => 2.5m;
+    public int MaxConsecutiveLosses => 3;
+    public int MaxHoldingMinutes => 360;
+    public SignalDirection? LastLossDirection => null;
+    public DateTimeOffset? LastLossAt => null;
+    public int CooldownMinutes => 0;  // disabled untuk backtest
+
+    public void Halt(string reason) { }
+    public void Resume() { }
+    public void RegisterLoss(SignalDirection direction) { }
+    public bool IsInCooldown(SignalDirection direction, out int minutesRemaining) { minutesRemaining = 0; return false; }
 }

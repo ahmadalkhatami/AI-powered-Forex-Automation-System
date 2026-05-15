@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ForexAI.Domain.Enums;
 using ForexAI.Domain.Interfaces;
 
 namespace ForexAI.Infrastructure;
@@ -20,6 +21,11 @@ public class SystemStateService : ISystemStateService
     public decimal MaxSpreadPips { get; private set; } = 2.5m;
     public int MaxConsecutiveLosses { get; private set; } = 3;
     public int MaxHoldingMinutes { get; private set; } = 360;  // 6 jam (M15: 24 bars)
+
+    // Post-loss cooldown: setelah trade rugi, block same-direction selama 30 menit
+    public SignalDirection? LastLossDirection { get; private set; }
+    public DateTimeOffset? LastLossAt { get; private set; }
+    public int CooldownMinutes { get; private set; } = 30;
 
     private readonly string _persistPath;
     private readonly object _lock = new();
@@ -53,19 +59,48 @@ public class SystemStateService : ISystemStateService
         }
     }
 
+    public void RegisterLoss(SignalDirection direction)
+    {
+        if (direction == SignalDirection.HOLD) return;
+        lock (_lock)
+        {
+            LastLossDirection = direction;
+            LastLossAt        = DateTimeOffset.UtcNow;
+            Save_NoLock();
+        }
+    }
+
+    public bool IsInCooldown(SignalDirection direction, out int minutesRemaining)
+    {
+        minutesRemaining = 0;
+        if (CooldownMinutes <= 0 || LastLossAt is null || LastLossDirection is null) return false;
+        if (LastLossDirection.Value != direction) return false;
+
+        var elapsed = (DateTimeOffset.UtcNow - LastLossAt.Value).TotalMinutes;
+        if (elapsed >= CooldownMinutes) return false;
+        minutesRemaining = (int)Math.Ceiling(CooldownMinutes - elapsed);
+        return true;
+    }
+
     private record Snapshot(
         bool IsHalted,
         string? HaltReason,
         DateTimeOffset? HaltedAt,
         decimal MaxSpreadPips,
         int MaxConsecutiveLosses,
-        int MaxHoldingMinutes = 360);
+        int MaxHoldingMinutes = 360,
+        SignalDirection? LastLossDirection = null,
+        DateTimeOffset? LastLossAt = null,
+        int CooldownMinutes = 30);
 
     private void Save_NoLock()
     {
         try
         {
-            var snap = new Snapshot(IsHalted, HaltReason, HaltedAt, MaxSpreadPips, MaxConsecutiveLosses, MaxHoldingMinutes);
+            var snap = new Snapshot(
+                IsHalted, HaltReason, HaltedAt,
+                MaxSpreadPips, MaxConsecutiveLosses, MaxHoldingMinutes,
+                LastLossDirection, LastLossAt, CooldownMinutes);
             var json = JsonSerializer.Serialize(snap, new JsonSerializerOptions { WriteIndented = true });
             var tmp  = _persistPath + ".tmp";
             File.WriteAllText(tmp, json);
@@ -89,6 +124,9 @@ public class SystemStateService : ISystemStateService
                 MaxSpreadPips        = snap.MaxSpreadPips > 0 ? snap.MaxSpreadPips : 2.5m;
                 MaxConsecutiveLosses = snap.MaxConsecutiveLosses > 0 ? snap.MaxConsecutiveLosses : 3;
                 MaxHoldingMinutes    = snap.MaxHoldingMinutes > 0 ? snap.MaxHoldingMinutes : 360;
+                LastLossDirection    = snap.LastLossDirection;
+                LastLossAt           = snap.LastLossAt;
+                CooldownMinutes      = snap.CooldownMinutes > 0 ? snap.CooldownMinutes : 30;
             }
         }
         catch { /* corrupt — ignore */ }

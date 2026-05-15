@@ -1,3 +1,5 @@
+using ForexAI.Domain.Enums;
+
 namespace ForexAI.Domain.Interfaces;
 
 /// <summary>
@@ -13,6 +15,14 @@ public interface ISystemStateService
     int              MaxConsecutiveLosses { get; }
     int              MaxHoldingMinutes    { get; }    // 0 = disabled
 
+    // Post-loss cooldown: setelah LOSS, block same-direction selama N menit
+    // untuk mencegah revenge-trade di kondisi market yang sama.
+    SignalDirection? LastLossDirection   { get; }
+    DateTimeOffset?  LastLossAt          { get; }
+    int              CooldownMinutes     { get; }    // 0 = disabled
+
     void Halt(string reason);
     void Resume();
+    void RegisterLoss(SignalDirection direction);
+    bool IsInCooldown(SignalDirection direction, out int minutesRemaining);
 }

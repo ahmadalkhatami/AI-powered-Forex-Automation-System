@@ -14,10 +14,12 @@ namespace ForexAI.Infrastructure.Services;
 public class LiveSignalAnalyzer : ISignalAnalyzer
 {
     private readonly IBrokerService _broker;
+    private readonly ISystemStateService _systemState;
 
-    public LiveSignalAnalyzer(IBrokerService broker)
+    public LiveSignalAnalyzer(IBrokerService broker, ISystemStateService systemState)
     {
-        _broker = broker;
+        _broker      = broker;
+        _systemState = systemState;
     }
 
     public async Task<TradeSignal> AnalyzeAsync(MarketSnapshot snap)
@@ -50,6 +52,14 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         var (vetoSignal, vetoReasons) = ApplySetupVetos(signal, snap, momentum, pctFromSupport);
         signal = vetoSignal;
 
+        // ── 4d. Cooldown veto — block same direction setelah LOSS ──────────
+        if (signal != SignalDirection.HOLD &&
+            _systemState.IsInCooldown(signal, out var minRemaining))
+        {
+            vetoReasons.Add($"VETO: {signal} di-override ke HOLD — cooldown post-LOSS aktif {minRemaining} menit lagi.");
+            signal = SignalDirection.HOLD;
+        }
+
         // ── 5. Scores ───────────────────────────────────────────────────────
         var (confluenceScore, confidenceScore) = CalculateScores(trend, momentum, structure, signal, snap.Regime);
 
@@ -76,31 +86,45 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
     }
 
     // ── Trend Analysis ────────────────────────────────────────────────────────
+    // Voting kondisi bullish: priceAboveMA20_M15, MA20>MA50_M15, MA20>MA50_H1, (opt) MA20>MA50_D1
+    // D1 vote di-skip jika MA20_D1=0 (candle D1 belum cukup) → fallback ke 3-vote system.
     private static (TrendAnalysis result, decimal bullishBias) AnalyzeTrend(MarketSnapshot snap)
     {
         bool priceAboveMA20  = snap.CurrentPrice > snap.MA20_M15;
         bool ma20AboveMA50   = snap.MA20_M15     > snap.MA50_M15;
         bool h1MA20AboveMA50 = snap.MA20_H1      > snap.MA50_H1;
+        bool hasD1           = snap.MA20_D1 > 0m && snap.MA50_D1 > 0m;
+        bool d1MA20AboveMA50 = hasD1 && snap.MA20_D1 > snap.MA50_D1;
 
-        // Setiap kondisi bullish = +1 poin dari 3
+        // Setiap kondisi bullish = +1 poin dari total votes
+        int totalVotes = hasD1 ? 4 : 3;
         decimal bullishPoints = (priceAboveMA20 ? 1m : 0m)
                               + (ma20AboveMA50   ? 1m : 0m)
-                              + (h1MA20AboveMA50 ? 1m : 0m);
-        decimal bullishBias = bullishPoints / 3m; // 0=bear, 1=bull
+                              + (h1MA20AboveMA50 ? 1m : 0m)
+                              + (hasD1 && d1MA20AboveMA50 ? 1m : 0m);
+        decimal bullishBias = bullishPoints / totalVotes; // 0=bear, 1=bull
 
         // Score = seberapa KONSISTEN semua indikator (0 = campur aduk, 1 = semua setuju)
         decimal trendScore = Math.Abs(bullishBias - 0.5m) * 2m;
 
         string bias     = bullishBias >= 0.6m ? "Bullish" : bullishBias <= 0.4m ? "Bearish" : "Neutral";
         string strength = trendScore switch { >= 0.8m => "Kuat", >= 0.5m => "Sedang", _ => "Lemah" };
-        bool htfAligned = (bullishBias >= 0.5m) == h1MA20AboveMA50;
+        // HTF alignment: M15 bias harus sejajar dengan tertinggi yang tersedia (D1 > H1)
+        bool htfTrend   = hasD1 ? d1MA20AboveMA50 : h1MA20AboveMA50;
+        bool htfAligned = (bullishBias >= 0.5m) == htfTrend;
 
-        string config = $"M15: MA20={snap.MA20_M15:F5} MA50={snap.MA50_M15:F5} | H1: MA20={snap.MA20_H1:F5} MA50={snap.MA50_H1:F5}";
+        string config = hasD1
+            ? $"M15: MA20={snap.MA20_M15:F5} MA50={snap.MA50_M15:F5} | H1: MA20={snap.MA20_H1:F5} MA50={snap.MA50_H1:F5} | D1: MA20={snap.MA20_D1:F5} MA50={snap.MA50_D1:F5}"
+            : $"M15: MA20={snap.MA20_M15:F5} MA50={snap.MA50_M15:F5} | H1: MA20={snap.MA20_H1:F5} MA50={snap.MA50_H1:F5}";
+
+        string d1Suffix = hasD1
+            ? $"; D1 {(d1MA20AboveMA50 ? "bullish" : "bearish")}"
+            : "";
 
         string rationale =
             $"Price {(priceAboveMA20 ? "di atas" : "di bawah")} MA20 M15; " +
             $"MA20 {(ma20AboveMA50 ? ">" : "<")} MA50 M15 ({(ma20AboveMA50 ? "bullish" : "bearish")}); " +
-            $"H1 {(h1MA20AboveMA50 ? "bullish" : "bearish")} — HTF {(htfAligned ? "sejajar" : "berlawanan")}";
+            $"H1 {(h1MA20AboveMA50 ? "bullish" : "bearish")}{d1Suffix} — HTF {(htfAligned ? "sejajar" : "berlawanan")}";
 
         return (new TrendAnalysis(
             Bias:           bias,
@@ -229,15 +253,43 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
     }
 
     // ── Setup Vetos — block trade pada kondisi reversal/overextension ────────
-    // Lessons learned dari 2 LOSS trade 2026-05-15: SELL near support + RSI 36 = bounce trap.
-    // Vetos: structure mismatch, RSI extreme, overextension dari MA.
+    // Lessons learned dari live trading (33% WR, 68% SELL counter-trend momentum):
+    // 1. Momentum-direction (counter-trend): block bila RSI direction lawan signal
+    // 2. Mid-range: tidak ada edge S/R → reject
+    // 3. Structure mismatch: SELL near support / BUY near resistance
+    // 4. RSI extreme: SELL pada RSI ≤ 45 / BUY pada RSI ≥ 55 (tightened dari 35/65)
+    // 5. Overextension: distance dari MA20 > 2 × ATR
     private static (SignalDirection result, List<string> reasons) ApplySetupVetos(
         SignalDirection signal, MarketSnapshot snap, MomentumAnalysis momentum, decimal pctFromSupport)
     {
         var reasons = new List<string>();
         if (signal == SignalDirection.HOLD) return (signal, reasons);
 
-        // VETO 1 — Structure mismatch: SELL near support / BUY near resistance
+        // VETO 1 — Counter-trend momentum (RSI direction melawan signal)
+        // Live data: 68% SELL signal terjadi saat RSI rising → momentum melawan = catching falling knife.
+        bool rsiRising  = momentum.RSIDirection.Equals("rising",  StringComparison.OrdinalIgnoreCase);
+        bool rsiFalling = momentum.RSIDirection.Equals("falling", StringComparison.OrdinalIgnoreCase);
+        if (signal == SignalDirection.SELL && rsiRising)
+        {
+            reasons.Add($"VETO: SELL di-override ke HOLD — RSI direction RISING, momentum melawan signal (counter-trend).");
+            return (SignalDirection.HOLD, reasons);
+        }
+        if (signal == SignalDirection.BUY && rsiFalling)
+        {
+            reasons.Add($"VETO: BUY di-override ke HOLD — RSI direction FALLING, momentum melawan signal (counter-trend).");
+            return (SignalDirection.HOLD, reasons);
+        }
+
+        // VETO 2 — Mid-range sejati (true 50/50 zone): tidak ada edge S/R sama sekali.
+        // Tightened ke 0.45-0.55 (dari 0.35-0.65) — voting system sudah handle setup lemah
+        // dengan structure score 0.40; veto ini cuma block kasus benar-benar mid (zero edge).
+        if (pctFromSupport > 0.45m && pctFromSupport < 0.55m)
+        {
+            reasons.Add($"VETO: {signal} di-override ke HOLD — price {pctFromSupport:P0} dari range = true mid-range, tidak ada edge S/R.");
+            return (SignalDirection.HOLD, reasons);
+        }
+
+        // VETO 3 — Structure mismatch: SELL near support / BUY near resistance
         // Price < 25% dari S→R range = sangat dekat support (bounce risk untuk SELL)
         // Price > 75% dari S→R range = sangat dekat resistance (rejection risk untuk BUY)
         if (signal == SignalDirection.SELL && pctFromSupport <= 0.25m)
@@ -251,19 +303,22 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             return (SignalDirection.HOLD, reasons);
         }
 
-        // VETO 2 — RSI extreme: SELL saat oversold / BUY saat overbought
-        if (signal == SignalDirection.SELL && momentum.RSIValue <= 35m)
+        // VETO 4 — RSI extreme zone (true overbought/oversold: 30/70 standar industri)
+        // Sebelumnya threshold 45/55 terlalu ketat — RSI 55-65 itu zona bullish biasa, bukan extreme.
+        // V1 (counter-trend RSI direction) sudah catch kasus "menjual saat RSI naik dari 36" —
+        // V4 ini cuma safety net untuk extreme sejati (≥70 atau ≤30).
+        if (signal == SignalDirection.SELL && momentum.RSIValue <= 30m)
         {
-            reasons.Add($"VETO: SELL di-override ke HOLD — RSI {momentum.RSIValue:F1} ≤ 35 (oversold), risiko reversal.");
+            reasons.Add($"VETO: SELL di-override ke HOLD — RSI {momentum.RSIValue:F1} ≤ 30 (oversold sejati), risiko reversal.");
             return (SignalDirection.HOLD, reasons);
         }
-        if (signal == SignalDirection.BUY && momentum.RSIValue >= 65m)
+        if (signal == SignalDirection.BUY && momentum.RSIValue >= 70m)
         {
-            reasons.Add($"VETO: BUY di-override ke HOLD — RSI {momentum.RSIValue:F1} ≥ 65 (overbought), risiko reversal.");
+            reasons.Add($"VETO: BUY di-override ke HOLD — RSI {momentum.RSIValue:F1} ≥ 70 (overbought sejati), risiko reversal.");
             return (SignalDirection.HOLD, reasons);
         }
 
-        // VETO 3 — Overextension dari MA20 M15 (>2 × ATR)
+        // VETO 5 — Overextension dari MA20 M15 (>2 × ATR)
         // Mencegah entry di tail-end momentum, mean-reversion lebih mungkin terjadi.
         if (snap.ATR14 > 0m)
         {

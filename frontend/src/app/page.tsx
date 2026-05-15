@@ -23,7 +23,7 @@ import {
   getCandles,
   getAccountHealth,
   getMifxStatus,
-  closePosition,
+  closePositionMarket,
   deployEa,
   haltSystem,
   resumeSystem,
@@ -573,14 +573,15 @@ export default function DashboardPage() {
     toast({ title: 'Signal dismissed', description: 'Run new analysis when ready' })
   }
 
-  const handleClosePosition = async (tradeId: string, outcome: 'WIN' | 'LOSS', exitPrice: number) => {
+  const handleCloseMarket = async (tradeId: string) => {
     try {
-      const closed = await closePosition(tradeId, outcome, exitPrice)
+      const closed = await closePositionMarket(tradeId)
       setPositions((prev) => prev.map((p) => p.tradeId === closed.tradeId ? closed : p))
       void Promise.all([refreshPositions(), refreshAccountHealth()])
+      const win = closed.status === 'CLOSED_WIN'
       toast({
-        title: outcome === 'WIN' ? '✅ Trade closed — WIN' : '❌ Trade closed — LOSS',
-        description: `Exit @ ${exitPrice.toFixed(5)}`,
+        title: win ? '✅ Trade closed — WIN' : '❌ Trade closed — LOSS',
+        description: `P&L $${closed.floatingPnl.toFixed(2)} (${closed.floatingPnlPips >= 0 ? '+' : ''}${closed.floatingPnlPips}p)`,
       })
     } catch (err) {
       const detail = err instanceof Error ? err.message : 'Close order could not be completed'
@@ -815,7 +816,7 @@ export default function DashboardPage() {
         <PositionsList
           positions={positionCards.length > 0 ? positionCards : null}
           currentPrice={currentPrice}
-          onClosePosition={handleClosePosition}
+          onCloseMarket={handleCloseMarket}
         />
       </div>
     </div>

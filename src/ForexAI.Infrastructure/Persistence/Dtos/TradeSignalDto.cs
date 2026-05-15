@@ -18,12 +18,17 @@ internal record TradeSignalDto
     public decimal SnapshotMA50_M15 { get; init; }
     public decimal SnapshotMA20_H1 { get; init; }
     public decimal SnapshotMA50_H1 { get; init; }
+    public decimal SnapshotMA20_D1 { get; init; }
+    public decimal SnapshotMA50_D1 { get; init; }
     public decimal SnapshotRSI14 { get; init; }
     public string SnapshotRSIDirection { get; init; } = "";
     public string SnapshotSupportZone { get; init; } = "";
     public string SnapshotResistanceZone { get; init; } = "";
     public string SnapshotSession { get; init; } = "";
     public DateTimeOffset SnapshotCapturedAt { get; init; }
+    public decimal SnapshotATR14 { get; init; }
+    public decimal SnapshotADX14 { get; init; }
+    public string SnapshotRegime { get; init; } = "";
 
     // TrendAnalysis fields
     public string TrendBias { get; init; } = "";

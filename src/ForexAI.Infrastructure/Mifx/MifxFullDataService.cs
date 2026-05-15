@@ -14,12 +14,14 @@ namespace ForexAI.Infrastructure.Mifx;
 public class MifxFullDataService : IMarketDataService
 {
     private readonly MifxPriceFeed _feed;
+    private readonly MifxCandleFeed _candleFeed;
     private readonly ILogger<MifxFullDataService> _logger;
 
-    public MifxFullDataService(MifxPriceFeed feed, ILogger<MifxFullDataService> logger)
+    public MifxFullDataService(MifxPriceFeed feed, MifxCandleFeed candleFeed, ILogger<MifxFullDataService> logger)
     {
-        _feed   = feed;
-        _logger = logger;
+        _feed       = feed;
+        _candleFeed = candleFeed;
+        _logger     = logger;
     }
 
     public Task<MarketSnapshot> GetSnapshotAsync(string pair, string timeframe)
@@ -39,9 +41,15 @@ public class MifxFullDataService : IMarketDataService
         decimal atrPips = tick.ATR14.HasValue ? Math.Round(tick.ATR14.Value / 0.0001m, 1) : 0m;
         decimal adx14   = tick.ADX14 ?? 0m;
         string  regime  = DetectRegime(adx14);
+
+        // D1 trend bias dari candle cache yang sudah di-push EA (PERIOD_D1).
+        // Backend hitung SMA20 & SMA50 dari close prices D1 → tidak butuh perubahan EA.
+        // Bernilai 0 jika candle D1 belum cukup (< 50 bar) → analyzer akan abaikan vote ini.
+        var (ma20D1, ma50D1) = ComputeD1Mas(pair);
+
         _logger.LogInformation(
-            "MT5 full data: {Pair} price={Price:F5} MA20M15={MA20:F5} RSI={RSI:F1} ATR={ATR:F1}pip ADX={ADX:F1} regime={Regime}",
-            tick.Pair, tick.Mid, tick.MA20_M15, tick.RSI14, atrPips, adx14, regime);
+            "MT5 full data: {Pair} price={Price:F5} MA20M15={MA20:F5} RSI={RSI:F1} ATR={ATR:F1}pip ADX={ADX:F1} regime={Regime} D1: MA20={D1MA20:F5} MA50={D1MA50:F5}",
+            tick.Pair, tick.Mid, tick.MA20_M15, tick.RSI14, atrPips, adx14, regime, ma20D1, ma50D1);
 
         var snapshot = new MarketSnapshot(
             Pair:           pair,
@@ -59,9 +67,25 @@ public class MifxFullDataService : IMarketDataService
             CapturedAt:     tick.Time,
             ATR14:          tick.ATR14 ?? 0m,
             ADX14:          adx14,
-            Regime:         regime);
+            Regime:         regime,
+            MA20_D1:        ma20D1,
+            MA50_D1:        ma50D1);
 
         return Task.FromResult(snapshot);
+    }
+
+    // Hitung SMA20 & SMA50 D1 dari candle cache (EA push setiap new D1 bar).
+    // Bar paling baru di akhir list (index = Count-1). SMA pakai close price.
+    private (decimal ma20, decimal ma50) ComputeD1Mas(string pair)
+    {
+        var bars = _candleFeed.Get(pair, "D1", 50);
+        if (bars.Count < 50) return (0m, 0m);
+
+        decimal sum20 = 0m, sum50 = 0m;
+        int n = bars.Count;
+        for (int i = n - 20; i < n; i++) sum20 += bars[i].Close;
+        for (int i = n - 50; i < n; i++) sum50 += bars[i].Close;
+        return (Math.Round(sum20 / 20m, 5), Math.Round(sum50 / 50m, 5));
     }
 
     /// <summary>

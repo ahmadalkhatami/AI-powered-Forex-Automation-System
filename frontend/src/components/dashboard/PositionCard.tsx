@@ -16,24 +16,21 @@ const borderClasses = {
 interface PositionCardProps {
   position: PositionCardData
   currentPrice?: number
-  onClose?: (tradeId: string, outcome: 'WIN' | 'LOSS', exitPrice: number) => Promise<void>
+  onCloseMarket?: (tradeId: string) => Promise<void>
 }
 
-export function PositionCard({ position, currentPrice, onClose }: PositionCardProps) {
-  const [showClose, setShowClose] = useState(false)
-  const [exitPrice, setExitPrice] = useState(currentPrice?.toFixed(5) ?? '')
+export function PositionCard({ position, currentPrice: _currentPrice, onCloseMarket }: PositionCardProps) {
+  const [confirming, setConfirming] = useState(false)
   const [closing, setClosing] = useState(false)
 
-  const handleClose = async (outcome: 'WIN' | 'LOSS') => {
-    if (!onClose) return
-    const price = parseFloat(exitPrice)
-    if (isNaN(price) || price <= 0) return
+  const handleClose = async () => {
+    if (!onCloseMarket) return
     setClosing(true)
     try {
-      await onClose(position.tradeId, outcome, price)
+      await onCloseMarket(position.tradeId)
     } finally {
       setClosing(false)
-      setShowClose(false)
+      setConfirming(false)
     }
   }
 
@@ -101,57 +98,46 @@ export function PositionCard({ position, currentPrice, onClose }: PositionCardPr
           </p>
         )}
 
-        {/* Manual close UI for ACTIVE positions */}
-        {position.status === 'ACTIVE' && onClose && (
+        {/* One-click close — backend auto-detect WIN/LOSS dari floating P&L + pakai market price */}
+        {position.status === 'ACTIVE' && onCloseMarket && (
           <div className="pt-1 border-t border-border/50">
-            {!showClose ? (
+            {!confirming ? (
               <Button
                 variant="outline"
                 size="sm"
                 className="w-full h-7 text-xs"
-                onClick={() => setShowClose(true)}
+                onClick={() => setConfirming(true)}
+                disabled={closing}
               >
-                Close Position
+                Close at Market
               </Button>
             ) : (
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground whitespace-nowrap">Exit price</span>
-                  <input
-                    type="number"
-                    step="0.00001"
-                    value={exitPrice}
-                    onChange={(e) => setExitPrice(e.target.value)}
-                    className="flex-1 h-7 px-2 text-xs font-mono rounded border border-input bg-background text-foreground"
-                  />
-                </div>
-                <div className="flex gap-1.5">
-                  <Button
-                    size="sm"
-                    className="flex-1 h-7 text-xs bg-emerald-600 hover:bg-emerald-700"
-                    onClick={() => handleClose('WIN')}
-                    disabled={closing}
-                  >
-                    ✅ WIN
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="flex-1 h-7 text-xs bg-red-600 hover:bg-red-700"
-                    onClick={() => handleClose('LOSS')}
-                    disabled={closing}
-                  >
-                    ❌ LOSS
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 text-xs px-2"
-                    onClick={() => setShowClose(false)}
-                    disabled={closing}
-                  >
-                    ✕
-                  </Button>
-                </div>
+              <div className="flex gap-1.5">
+                <Button
+                  size="sm"
+                  className={cn(
+                    'flex-1 h-7 text-xs',
+                    position.floatingPnl >= 0
+                      ? 'bg-emerald-600 hover:bg-emerald-700'
+                      : 'bg-red-600 hover:bg-red-700',
+                  )}
+                  onClick={handleClose}
+                  disabled={closing}
+                  title={`Close akan eksekusi market & catat ${position.floatingPnl >= 0 ? 'WIN' : 'LOSS'} dari floating P&L`}
+                >
+                  {closing
+                    ? 'Closing…'
+                    : `Confirm: close as ${position.floatingPnl >= 0 ? 'WIN' : 'LOSS'} (${position.floatingPnl >= 0 ? '+' : ''}${position.floatingPnl.toFixed(2)})`}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs px-2"
+                  onClick={() => setConfirming(false)}
+                  disabled={closing}
+                >
+                  ✕
+                </Button>
               </div>
             )}
           </div>

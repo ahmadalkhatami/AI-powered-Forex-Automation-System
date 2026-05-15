@@ -16,6 +16,13 @@ export interface AccountHealthData {
   dailyRiskUsedUsd?: number      // total $ risk dipakai hari ini
   tradesOpenedToday?: number     // jumlah trade dibuka hari ini
   dailyCapUtilization?: number   // 0.0–1.0+ — >1 = cap terlewat
+
+  // Production safety
+  consecutiveLosses?: number
+  maxConsecutiveLosses?: number
+  isHalted?: boolean
+  haltReason?: string | null
+  maxSpreadPips?: number
 }
 
 export interface CandleBar {
@@ -59,6 +66,83 @@ export interface AccountHealthResponse {
   dailyRiskUsedUsd: number
   tradesOpenedToday: number
   dailyCapUtilization: number
+
+  // Production safety
+  consecutiveLosses: number
+  maxConsecutiveLosses: number
+  isHalted: boolean
+  haltReason: string | null
+  maxSpreadPips: number
+}
+
+export interface AuditEvent {
+  timestamp: string
+  type: string
+  summary: string
+  payload?: unknown
+}
+
+export interface SystemState {
+  isHalted: boolean
+  haltReason: string | null
+  haltedAt: string | null
+  maxSpreadPips: number
+  maxConsecutiveLosses: number
+}
+
+// ── Backtest ────────────────────────────────────────────────────────────
+export interface BacktestRunRequest {
+  pair: string
+  timeframe: ChartTimeframe
+  startingEquity: number
+  maxBarsPerTrade: number
+  minConfidence: number  // 0.0–1.0
+  blockHold: boolean
+}
+
+export interface BacktestTrade {
+  entryTime: number
+  entryPrice: number
+  direction: 'BUY' | 'SELL'
+  stopLoss: number
+  takeProfit: number
+  lotSize: number
+  exitTime: number | null
+  exitPrice: number | null
+  status: 'WIN' | 'LOSS' | 'TIMEOUT'
+  pnl: number
+  pips: number
+  confidence: number
+  barsHeld: number
+}
+
+export interface BacktestEquityPoint {
+  time: number
+  equity: number
+}
+
+export interface BacktestResult {
+  pair: string
+  timeframe: ChartTimeframe
+  candleCount: number
+  backtestBars: number
+  totalTrades: number
+  wins: number
+  losses: number
+  timeouts: number
+  startingEquity: number
+  finalEquity: number
+  netPnl: number
+  grossWin: number
+  grossLoss: number
+  profitFactor: number
+  expectancy: number
+  winRate: number
+  maxDrawdownPct: number
+  maxConsecutiveWins: number
+  maxConsecutiveLosses: number
+  trades: BacktestTrade[]
+  equityCurve: BacktestEquityPoint[]
 }
 
 export interface PositionCardData {

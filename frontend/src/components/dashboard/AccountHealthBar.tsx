@@ -181,6 +181,33 @@ export function AccountHealthBar({ data, positions = [], baselineEquity = 1000 }
           </div>
         )}
 
+        {data.isHalted && (
+          <div className="bg-red-100 dark:bg-red-950/30 border border-red-400 rounded-md p-2 mt-2">
+            <p className="text-xs text-red-600 dark:text-red-400 font-semibold">🛑 SYSTEM HALTED — kill switch aktif</p>
+            <p className="text-xs text-red-500 dark:text-red-400">{data.haltReason ?? 'Manual halt by user'}</p>
+            <p className="text-xs text-muted-foreground italic">Klik tombol Resume untuk lanjutkan</p>
+          </div>
+        )}
+
+        {!data.isHalted && (data.consecutiveLosses ?? 0) >= (data.maxConsecutiveLosses ?? 3) && (
+          <div className="bg-red-100 dark:bg-red-950/30 border border-red-400 rounded-md p-2 mt-2">
+            <p className="text-xs text-red-600 dark:text-red-400 font-semibold">
+              ⚡ Circuit breaker — {data.consecutiveLosses} LOSS berturut-turut
+            </p>
+            <p className="text-xs text-red-500 dark:text-red-400">
+              Execute path blocked (≥ {data.maxConsecutiveLosses}). Resume manual setelah review strategy.
+            </p>
+          </div>
+        )}
+
+        {!data.isHalted &&
+         (data.consecutiveLosses ?? 0) > 0 &&
+         (data.consecutiveLosses ?? 0) < (data.maxConsecutiveLosses ?? 3) && (
+          <div className="text-xs text-amber-600 dark:text-amber-500 font-mono mt-1">
+            ⚠ {data.consecutiveLosses} LOSS berturut-turut · circuit breaker @{data.maxConsecutiveLosses}
+          </div>
+        )}
+
         {(dailyCapHit || tradesCapHit) && state !== 'stopped' && (
           <div className="bg-amber-100 dark:bg-amber-950/30 border border-amber-300 rounded-md p-2 mt-2">
             <p className="text-xs text-amber-700 dark:text-amber-400 font-semibold">

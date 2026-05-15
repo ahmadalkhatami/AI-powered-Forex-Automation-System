@@ -18,17 +18,20 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
     private readonly ISignalRepository _signals;
     private readonly ITradePositionRepository _positions;
     private readonly IBrokerService _broker;
+    private readonly ISystemStateService _systemState;
     private readonly ILogger<ExecuteTradeHandler> _logger;
 
     public ExecuteTradeHandler(
         ISignalRepository signals,
         ITradePositionRepository positions,
         IBrokerService broker,
+        ISystemStateService systemState,
         ILogger<ExecuteTradeHandler> logger)
     {
         _signals = signals;
         _positions = positions;
         _broker = broker;
+        _systemState = systemState;
         _logger = logger;
     }
 
@@ -47,6 +50,38 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
             _logger.LogWarning("Trade skipped (NO-GO): {Reason}", skipReason);
 
             var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, skipReason);
+            await _positions.SaveAsync(skipped);
+            return skipped;
+        }
+
+        // Kill switch — block execute apapun saat system halted
+        if (_systemState.IsHalted)
+        {
+            var msg = $"System HALTED: {_systemState.HaltReason}";
+            _logger.LogWarning("Trade skipped: {Reason}", msg);
+            var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
+            await _positions.SaveAsync(skipped);
+            return skipped;
+        }
+
+        // Circuit breaker: stop kalau LOSS berturut-turut mencapai threshold
+        var recentClosed = (await _positions.GetAllAsync())
+            .Where(rc => rc.ClosedAt.HasValue &&
+                        (rc.Status == TradeStatus.CLOSED_WIN || rc.Status == TradeStatus.CLOSED_LOSS))
+            .OrderByDescending(rc => rc.ClosedAt!.Value)
+            .ToList();
+        int consecutiveLosses = 0;
+        foreach (var rc in recentClosed)
+        {
+            if (rc.Status == TradeStatus.CLOSED_LOSS) consecutiveLosses++;
+            else break;
+        }
+        if (consecutiveLosses >= _systemState.MaxConsecutiveLosses)
+        {
+            var msg = $"Circuit breaker — {consecutiveLosses} LOSS berturut-turut (≥ {_systemState.MaxConsecutiveLosses}). " +
+                      $"Resume manual via dashboard.";
+            _logger.LogWarning("Trade skipped: {Reason}", msg);
+            var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
             await _positions.SaveAsync(skipped);
             return skipped;
         }

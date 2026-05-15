@@ -31,6 +31,12 @@ public class MifxCommandQueue
     private readonly ConcurrentDictionary<string, TaskCompletionSource<MifxOrderResult>>
         _awaiting = new();
 
+    // Idempotency cache — commandIds yang sudah pernah complete dalam window 5 menit.
+    // Mencegah EA double-POST /order-result (network retry) jadi double-fill di domain logic.
+    private readonly ConcurrentDictionary<string, (MifxOrderResult Result, DateTimeOffset At)>
+        _recentResults = new();
+    private static readonly TimeSpan IdempotencyWindow = TimeSpan.FromMinutes(5);
+
     /// <summary>
     /// Backend enqueue order → menunggu hasil dari EA (max timeout detik).
     /// </summary>
@@ -60,10 +66,34 @@ public class MifxCommandQueue
 
     /// <summary>
     /// EA memanggil endpoint POST /api/mifx/order-result → selesaikan task.
+    /// Idempotent: kalau commandId sudah pernah di-complete dalam 5 menit terakhir,
+    /// return DUPLICATE (caller bisa skip double-processing).
     /// </summary>
-    public void Complete(MifxOrderResult result)
+    public CompleteOutcome Complete(MifxOrderResult result)
     {
+        // Garbage-collect entry lama (lazy GC)
+        var cutoff = DateTimeOffset.UtcNow - IdempotencyWindow;
+        foreach (var kv in _recentResults)
+            if (kv.Value.At < cutoff)
+                _recentResults.TryRemove(kv.Key, out _);
+
+        if (_recentResults.ContainsKey(result.CommandId))
+            return CompleteOutcome.Duplicate;
+
+        _recentResults[result.CommandId] = (result, DateTimeOffset.UtcNow);
+
         if (_awaiting.TryRemove(result.CommandId, out var tcs))
+        {
             tcs.TrySetResult(result);
+            return CompleteOutcome.Completed;
+        }
+        return CompleteOutcome.Orphaned;  // result datang tapi tidak ada task awaiting
     }
+}
+
+public enum CompleteOutcome
+{
+    Completed,    // task awaiting → result delivered
+    Duplicate,    // commandId pernah complete dalam window — skip
+    Orphaned      // result datang tapi tidak ada task awaiting (kemungkinan timeout)
 }

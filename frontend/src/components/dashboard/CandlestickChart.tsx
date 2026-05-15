@@ -19,6 +19,7 @@ import {
   type UTCTimestamp,
   type CandlestickData,
 } from 'lightweight-charts'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { computeSMA, computeRSI } from '@/lib/indicators'
@@ -94,6 +95,20 @@ export function CandlestickChart({
   const priceLinesRef = useRef<IPriceLine[]>([])
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
   const [tooltip, setTooltip] = useState<OhlcTooltip | null>(null)
+  const [isCollapsed, setIsCollapsed] = useState(false)
+
+  // Load collapse state dari localStorage (persisted across reload)
+  useEffect(() => {
+    setIsCollapsed(localStorage.getItem('forexai.chartCollapsed') === 'true')
+  }, [])
+
+  const toggleCollapsed = () => {
+    setIsCollapsed((prev) => {
+      const next = !prev
+      localStorage.setItem('forexai.chartCollapsed', String(next))
+      return next
+    })
+  }
 
   useEffect(() => {
     if (!mainContainerRef.current || !rsiContainerRef.current) return
@@ -318,6 +333,20 @@ export function CandlestickChart({
     mainChartRef.current?.timeScale().fitContent()
   }, [candles])
 
+  // Saat re-expand dari collapsed: paksa chart re-fit ke width container baru
+  useEffect(() => {
+    if (isCollapsed) return
+    requestAnimationFrame(() => {
+      if (mainContainerRef.current && mainChartRef.current) {
+        mainChartRef.current.applyOptions({ width: mainContainerRef.current.clientWidth })
+        mainChartRef.current.timeScale().fitContent()
+      }
+      if (rsiContainerRef.current && rsiChartRef.current) {
+        rsiChartRef.current.applyOptions({ width: rsiContainerRef.current.clientWidth })
+      }
+    })
+  }, [isCollapsed])
+
   useEffect(() => {
     if (!candleSeriesRef.current || livePrice == null || candles.length === 0) return
     const last = candles[candles.length - 1]
@@ -479,6 +508,13 @@ export function CandlestickChart({
             )}
           </div>
           <div className="flex items-center gap-3 text-xs">
+            <button
+              onClick={toggleCollapsed}
+              className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+              title={isCollapsed ? 'Expand chart' : 'Minimize chart'}
+            >
+              {isCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+            </button>
             {displayPrice && (
               <span className="font-mono font-semibold text-base">
                 {displayPrice.toFixed(5)}
@@ -493,7 +529,10 @@ export function CandlestickChart({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="p-0 pb-2 relative">
+      <CardContent
+        className="p-0 pb-2 relative"
+        style={isCollapsed ? { display: 'none' } : undefined}
+      >
         <div ref={mainContainerRef} className="w-full" style={{ minHeight: 480 }} />
         {candles.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground pointer-events-none">

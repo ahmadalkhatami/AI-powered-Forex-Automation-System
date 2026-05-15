@@ -27,5 +27,17 @@ public record AccountHealthResult(
     /// <summary>Jumlah trade yang sudah dibuka hari ini</summary>
     int     TradesOpenedToday    = 0,
     /// <summary>% utilisasi daily cap saat ini (0.0–1.0+) — &gt;1 berarti cap sudah terlewat</summary>
-    decimal DailyCapUtilization  = 0m
+    decimal DailyCapUtilization  = 0m,
+
+    // ── Production safety: circuit breaker + halt ──────────────────────────
+    /// <summary>Jumlah LOSS berturut-turut paling baru (reset oleh WIN)</summary>
+    int     ConsecutiveLosses    = 0,
+    /// <summary>Threshold circuit breaker dari config</summary>
+    int     MaxConsecutiveLosses = 3,
+    /// <summary>True kalau sistem di-halt user / circuit breaker</summary>
+    bool    IsHalted             = false,
+    /// <summary>Reason kenapa di-halt (untuk display banner)</summary>
+    string? HaltReason           = null,
+    /// <summary>Max spread (pips) yang diizinkan untuk execute order</summary>
+    decimal MaxSpreadPips        = 2.5m
 );

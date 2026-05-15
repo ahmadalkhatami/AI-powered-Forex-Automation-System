@@ -262,18 +262,22 @@ public class MifxBridgeController : ControllerBase
     [HttpPost("order-result")]
     public IActionResult ReceiveOrderResult([FromBody] MifxOrderResultRequest req)
     {
+        var outcome = _queue.Complete(new MifxOrderResult(
+            req.CommandId, req.Status, req.OrderId, req.Price, req.Retcode));
+
+        if (outcome == CompleteOutcome.Duplicate)
+        {
+            _logger.LogInformation(
+                "Order-result DUPLICATE diabaikan: commandId={Id} (sudah diproses dalam 5 menit terakhir)",
+                req.CommandId);
+            return Ok(new { duplicate = true });
+        }
+
         _logger.LogInformation(
-            "Hasil order dari EA: commandId={Id} status={Status} orderId={OId} price={Price}",
-            req.CommandId, req.Status, req.OrderId, req.Price);
+            "Hasil order dari EA: commandId={Id} status={Status} orderId={OId} price={Price} outcome={Outcome}",
+            req.CommandId, req.Status, req.OrderId, req.Price, outcome);
 
-        _queue.Complete(new MifxOrderResult(
-            req.CommandId,
-            req.Status,
-            req.OrderId,
-            req.Price,
-            req.Retcode));
-
-        return Ok();
+        return Ok(new { outcome = outcome.ToString() });
     }
 
     // ── Dipanggil EA saat connect/disconnect ─────────────────────

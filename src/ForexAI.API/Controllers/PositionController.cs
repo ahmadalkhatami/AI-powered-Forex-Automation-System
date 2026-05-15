@@ -4,6 +4,7 @@ using ForexAI.Application.UseCases.GetAllPositions;
 using ForexAI.Application.UseCases.GetPositionStatus;
 using ForexAI.Domain.Entities;
 using ForexAI.Domain.Enums;
+using ForexAI.Infrastructure;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,8 +15,13 @@ namespace ForexAI.API.Controllers;
 public class PositionController : ControllerBase
 {
     private readonly IMediator _mediator;
+    private readonly AuditLogger _audit;
 
-    public PositionController(IMediator mediator) => _mediator = mediator;
+    public PositionController(IMediator mediator, AuditLogger audit)
+    {
+        _mediator = mediator;
+        _audit    = audit;
+    }
 
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<TradePosition>>> GetAll(CancellationToken ct)
@@ -43,6 +49,12 @@ public class PositionController : ControllerBase
 
         var result = await _mediator.Send(
             new ClosePositionCommand(tradeId, outcome, request.ExitPrice), ct);
+
+        _audit.Log("close",
+            $"{result.Status} {result.Pair} · pnl ${result.FloatingPnl:F2} ({result.FloatingPnlPips}p) @ {request.ExitPrice}",
+            new { tradeId = result.TradeId, outcome = result.Status.ToString(),
+                  exitPrice = request.ExitPrice, pnl = result.FloatingPnl, pips = result.FloatingPnlPips });
+
         return Ok(result);
     }
 }

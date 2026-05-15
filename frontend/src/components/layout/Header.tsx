@@ -16,12 +16,36 @@ export function Header() {
   return (
     <header className="w-full border-b border-border bg-background px-8 py-3 flex items-center justify-between">
       <span className="font-semibold text-foreground">EUR/USD · M15</span>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-4">
+        <Link
+          href="/"
+          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Dashboard
+        </Link>
         <Link
           href="/history"
           className="text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
-          History ↗
+          History
+        </Link>
+        <Link
+          href="/analytics"
+          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Analytics
+        </Link>
+        <Link
+          href="/audit"
+          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Audit
+        </Link>
+        <Link
+          href="/backtest"
+          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Backtest
         </Link>
         <button
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}

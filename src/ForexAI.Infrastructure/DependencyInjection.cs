@@ -24,6 +24,11 @@ public static class DependencyInjection
     {
         var mifx = configuration.GetSection(MifxSettings.Section).Get<MifxSettings>() ?? new();
 
+        // Singletons for cross-cutting safety + audit
+        services.AddSingleton<ISystemStateService, SystemStateService>();
+        services.AddSingleton<AuditLogger>();
+        services.AddScoped<BacktestRunner>();
+
         services.AddScoped<EaDeployService>();
         services.AddScoped<ITradePositionRepository, JsonTradePositionRepository>();
         services.AddScoped<ISignalRepository, JsonSignalRepository>();

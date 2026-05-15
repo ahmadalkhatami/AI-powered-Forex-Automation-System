@@ -9,16 +9,22 @@ public class MifxBrokerService : IBrokerService
 {
     private readonly MifxPriceFeed _feed;
     private readonly MifxCommandQueue _queue;
+    private readonly ISystemStateService _systemState;
+    private readonly AuditLogger _audit;
     private readonly ILogger<MifxBrokerService> _logger;
 
     public MifxBrokerService(
         MifxPriceFeed feed,
         MifxCommandQueue queue,
+        ISystemStateService systemState,
+        AuditLogger audit,
         ILogger<MifxBrokerService> logger)
     {
-        _feed   = feed;
-        _queue  = queue;
-        _logger = logger;
+        _feed        = feed;
+        _queue       = queue;
+        _systemState = systemState;
+        _audit       = audit;
+        _logger      = logger;
     }
 
     public bool IsLive => _feed.IsConnected;
@@ -38,6 +44,29 @@ public class MifxBrokerService : IBrokerService
         {
             _logger.LogWarning("MIFX EA tidak terkoneksi — order dibatalkan");
             return BrokerOrderResult.Disconnected();
+        }
+
+        // Kill switch — block apapun saat halt aktif
+        if (_systemState.IsHalted)
+        {
+            _logger.LogWarning("System HALTED ({Reason}) — order ditolak", _systemState.HaltReason);
+            _audit.Log("block", $"Order rejected — system halted: {_systemState.HaltReason}",
+                new { request.Instrument, request.IsBuy, request.LotSize });
+            return BrokerOrderResult.Failed(-30);  // -30 = halt code
+        }
+
+        // Spread filter — reject saat spread di atas threshold
+        var tick = _feed.Latest;
+        var currentSpread = tick?.Spread ?? 0m;
+        if (currentSpread > _systemState.MaxSpreadPips)
+        {
+            _logger.LogWarning(
+                "Order ditolak: spread {Spread:F1} pip > batas {Max:F1} pip",
+                currentSpread, _systemState.MaxSpreadPips);
+            _audit.Log("block",
+                $"Order rejected — spread {currentSpread:F1}p > {_systemState.MaxSpreadPips:F1}p limit",
+                new { spread = currentSpread, max = _systemState.MaxSpreadPips });
+            return BrokerOrderResult.Failed(-31);  // -31 = spread too wide
         }
 
         var command = new MifxOrderCommand(

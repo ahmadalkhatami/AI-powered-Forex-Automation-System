@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { RefreshCw, Cpu, Bell, BellOff } from 'lucide-react'
+import { RefreshCw, Cpu, Bell, BellOff, Zap, ZapOff, OctagonAlert, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { SignalHero } from '@/components/dashboard/SignalHero'
@@ -25,6 +25,8 @@ import {
   getMifxStatus,
   closePosition,
   deployEa,
+  haltSystem,
+  resumeSystem,
 } from '@/lib/api'
 import type {
   SignalHeroData,
@@ -169,10 +171,12 @@ export default function DashboardPage() {
   const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('M15')
   const [mifxStatus, setMifxStatus] = useState<MifxStatusResponse | null>(null)
   const [autoTrigger, setAutoTrigger] = useState(false)
+  const [autoApprove, setAutoApprove] = useState(false)
   const stream = useDashboardStream()
   const livePollInFlight = useRef(false)
   const lastBarTimeRef = useRef<number | null>(null)
   const notifiedSignalIdRef = useRef<string | null>(null)
+  const autoApprovedSignalIdRef = useRef<string | null>(null)
   const [accountHealth, setAccountHealth] = useState<AccountHealthData>({
     equity: INITIAL_EQUITY,
     peakEquity: INITIAL_EQUITY,
@@ -203,6 +207,11 @@ export default function DashboardPage() {
         dailyRiskUsedUsd: health.dailyRiskUsedUsd,
         tradesOpenedToday: health.tradesOpenedToday,
         dailyCapUtilization: health.dailyCapUtilization,
+        consecutiveLosses: health.consecutiveLosses,
+        maxConsecutiveLosses: health.maxConsecutiveLosses,
+        isHalted: health.isHalted,
+        haltReason: health.haltReason,
+        maxSpreadPips: health.maxSpreadPips,
       })
     } catch {
       // keep previous value
@@ -307,6 +316,11 @@ export default function DashboardPage() {
         dailyRiskUsedUsd: h.dailyRiskUsedUsd,
         tradesOpenedToday: h.tradesOpenedToday,
         dailyCapUtilization: h.dailyCapUtilization,
+        consecutiveLosses: h.consecutiveLosses,
+        maxConsecutiveLosses: h.maxConsecutiveLosses,
+        isHalted: h.isHalted,
+        haltReason: h.haltReason,
+        maxSpreadPips: h.maxSpreadPips,
       })
     }
   }, [stream.accountHealth])
@@ -353,14 +367,29 @@ export default function DashboardPage() {
     return () => clearInterval(id)
   }, [stream.isConnected])
 
-  // Load auto-trigger preference + request notification permission
+  // Load auto-trigger + auto-approve preference + request notification permission
   useEffect(() => {
-    const saved = localStorage.getItem('forexai.autoTrigger') === 'true'
-    setAutoTrigger(saved)
-    if (saved && 'Notification' in window && Notification.permission === 'default') {
+    const savedTrigger = localStorage.getItem('forexai.autoTrigger') === 'true'
+    const savedApprove = localStorage.getItem('forexai.autoApprove') === 'true'
+    setAutoTrigger(savedTrigger)
+    setAutoApprove(savedApprove)
+    if (savedTrigger && 'Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {})
     }
   }, [])
+
+  const toggleAutoApprove = useCallback(() => {
+    const next = !autoApprove
+    setAutoApprove(next)
+    localStorage.setItem('forexai.autoApprove', String(next))
+    toast({
+      title: next ? '⚡ Auto-approve aktif' : '🛑 Auto-approve nonaktif',
+      description: next
+        ? 'Signal dengan confidence ≥ 80% akan auto-execute tanpa konfirmasi'
+        : 'Kembali butuh klik Approve manual',
+      variant: next ? 'default' : 'default',
+    })
+  }, [autoApprove, toast])
 
   const toggleAutoTrigger = useCallback(() => {
     const next = !autoTrigger
@@ -419,7 +448,7 @@ export default function DashboardPage() {
     })
   }, [rawSignal, riskValidation])
 
-  const handleApprove = async () => {
+  const handleApprove = useCallback(async () => {
     if (!rawSignal || !riskValidation) return
     setPageState('processing')
     try {
@@ -456,6 +485,64 @@ export default function DashboardPage() {
     } catch {
       setPageState('signal-ready')
       toast({ title: 'Execute failed', description: 'Trade could not be executed', variant: 'destructive' })
+    }
+  }, [rawSignal, riskValidation, mifxStatus, accountHealth, refreshPositions, refreshAccountHealth, toast])
+
+  // Auto-approve: signal BUY/SELL dengan confidence ≥ 80% dan decision GO/GO_WITH_CAUTION → eksekusi otomatis
+  useEffect(() => {
+    if (!autoApprove) return
+    if (!rawSignal || !riskValidation) return
+    if (autoApprovedSignalIdRef.current === rawSignal.id) return
+    if (riskValidation.decision === 'NO-GO') return
+    if (rawSignal.signal !== 'BUY' && rawSignal.signal !== 'SELL') return
+    if (rawSignal.confidenceScore < 0.80) return
+    if (pageState === 'processing' || pageState === 'monitoring') return
+    if (positions.some((p) => p.status === 'ACTIVE')) return
+
+    autoApprovedSignalIdRef.current = rawSignal.id
+    const conf = (rawSignal.confidenceScore * 100).toFixed(0)
+    toast({
+      title: '🤖 Auto-approve fire',
+      description: `${rawSignal.signal} ${rawSignal.pair} · Confidence ${conf}% ≥ 80% — eksekusi otomatis`,
+    })
+    handleApprove()
+  }, [autoApprove, rawSignal, riskValidation, pageState, positions, handleApprove, toast])
+
+  const handleHalt = async () => {
+    const confirmed = typeof window !== 'undefined' &&
+      window.confirm('Tutup SEMUA posisi aktif + matikan auto-trading?\n\nIni emergency stop — bisa di-resume manual setelah review.')
+    if (!confirmed) return
+    try {
+      const result = await haltSystem('Manual emergency halt from dashboard', true)
+      setAutoTrigger(false)
+      setAutoApprove(false)
+      localStorage.setItem('forexai.autoTrigger', 'false')
+      localStorage.setItem('forexai.autoApprove', 'false')
+      toast({
+        title: '🛑 SYSTEM HALTED',
+        description: `Closed ${result.closedCount} positions${result.failures.length > 0 ? ` · ${result.failures.length} gagal` : ''}`,
+        variant: 'destructive',
+        duration: 10_000,
+      })
+    } catch (err) {
+      toast({
+        title: 'Halt gagal',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  const handleResume = async () => {
+    try {
+      await resumeSystem()
+      toast({ title: '✅ System resumed', description: 'Trading kembali aktif' })
+    } catch (err) {
+      toast({
+        title: 'Resume gagal',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      })
     }
   }
 
@@ -593,6 +680,29 @@ export default function DashboardPage() {
             )}
           </div>
           <div className="flex items-center gap-2">
+            {accountHealth.isHalted ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleResume}
+                className="gap-2 border-emerald-500/60 text-emerald-600 hover:bg-emerald-500/10 dark:text-emerald-400"
+                title="Resume trading dari halt state"
+              >
+                <Play className="h-3.5 w-3.5" />
+                Resume
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleHalt}
+                className="gap-2 border-red-500/60 text-red-600 hover:bg-red-500/10 dark:text-red-400"
+                title="Emergency stop: close semua active positions + matikan auto-trading"
+              >
+                <OctagonAlert className="h-3.5 w-3.5" />
+                Halt
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -613,6 +723,18 @@ export default function DashboardPage() {
             >
               {autoTrigger ? <Bell className="h-3.5 w-3.5" /> : <BellOff className="h-3.5 w-3.5" />}
               {autoTrigger ? 'Auto ON' : 'Auto OFF'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleAutoApprove}
+              className={cn('gap-2', autoApprove && 'border-amber-500/60 text-amber-600 dark:text-amber-400')}
+              title={autoApprove
+                ? 'Auto-execute aktif: trade otomatis saat confidence ≥ 80%'
+                : 'Klik untuk aktifkan auto-execute (≥80% confidence)'}
+            >
+              {autoApprove ? <Zap className="h-3.5 w-3.5" /> : <ZapOff className="h-3.5 w-3.5" />}
+              {autoApprove ? 'Exec ≥80%' : 'Exec OFF'}
             </Button>
             <Button
               variant="outline"

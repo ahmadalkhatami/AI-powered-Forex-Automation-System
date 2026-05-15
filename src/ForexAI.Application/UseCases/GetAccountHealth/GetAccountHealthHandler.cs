@@ -12,13 +12,16 @@ public class GetAccountHealthHandler : IRequestHandler<GetAccountHealthQuery, Ac
 
     private readonly ITradePositionRepository _positions;
     private readonly IBrokerService           _broker;
+    private readonly ISystemStateService      _systemState;
 
     public GetAccountHealthHandler(
         ITradePositionRepository positions,
-        IBrokerService broker)
+        IBrokerService broker,
+        ISystemStateService systemState)
     {
-        _positions = positions;
-        _broker    = broker;
+        _positions   = positions;
+        _broker      = broker;
+        _systemState = systemState;
     }
 
     public async Task<AccountHealthResult> Handle(GetAccountHealthQuery _, CancellationToken ct)
@@ -76,6 +79,19 @@ public class GetAccountHealthHandler : IRequestHandler<GetAccountHealthQuery, Ac
             ? Math.Max(0m, (peakEquity - equity) / peakEquity)
             : 0m;
 
+        // ── Consecutive losses (circuit breaker) ───────────────────────────
+        // Iterate closed positions dari yang paling baru; hitung LOSS terus-menerus sampai ketemu WIN.
+        var closedNewestFirst = closed
+            .Where(p => p.ClosedAt.HasValue)
+            .OrderByDescending(p => p.ClosedAt!.Value)
+            .ToList();
+        int consecutiveLosses = 0;
+        foreach (var p in closedNewestFirst)
+        {
+            if (p.Status == TradeStatus.CLOSED_LOSS) consecutiveLosses++;
+            else break;
+        }
+
         // ── Tier-based risk + daily cap snapshot (Sprint 1 item 1) ──────────
         var tier        = RiskTier.FromEquity(equity);
         var dailyUsage  = await _positions.GetDailyRiskUsageAsync(DateTimeOffset.UtcNow);
@@ -100,7 +116,13 @@ public class GetAccountHealthHandler : IRequestHandler<GetAccountHealthQuery, Ac
             MaxDailyTrades:      tier.MaxDailyTrades,
             DailyRiskUsedUsd:    Math.Round(dailyUsage.UsedUsd, 2),
             TradesOpenedToday:   dailyUsage.TradeCount,
-            DailyCapUtilization: Math.Round(utilization, 4)
+            DailyCapUtilization: Math.Round(utilization, 4),
+
+            ConsecutiveLosses:    consecutiveLosses,
+            MaxConsecutiveLosses: _systemState.MaxConsecutiveLosses,
+            IsHalted:             _systemState.IsHalted,
+            HaltReason:           _systemState.HaltReason,
+            MaxSpreadPips:        _systemState.MaxSpreadPips
         );
     }
 }

@@ -9,6 +9,10 @@ import type {
   ChartTimeframe,
   AccountHealthResponse,
   MifxStatusResponse,
+  AuditEvent,
+  SystemState,
+  BacktestRunRequest,
+  BacktestResult,
 } from '@/lib/types'
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -108,5 +112,41 @@ export async function closePosition(
   return fetchApi(`/api/position/${tradeId}/close`, {
     method: 'POST',
     body: JSON.stringify({ outcome, exitPrice }),
+  })
+}
+
+// ── System control (kill switch) ────────────────────────────────────────
+export async function getSystemState(): Promise<SystemState> {
+  return fetchApi('/api/system/state')
+}
+
+export async function haltSystem(
+  reason: string,
+  closeAll: boolean = true,
+): Promise<{ halted: boolean; closedCount: number; closedTickets: string[]; failures: string[] }> {
+  return fetchApi(`/api/system/halt?closeAll=${closeAll}`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  })
+}
+
+export async function resumeSystem(): Promise<{ halted: boolean }> {
+  return fetchApi('/api/system/resume', { method: 'POST' })
+}
+
+// ── Audit log ───────────────────────────────────────────────────────────
+export async function getAuditEvents(
+  limit: number = 200,
+  type?: string,
+): Promise<AuditEvent[]> {
+  const qs = type ? `?limit=${limit}&type=${type}` : `?limit=${limit}`
+  return fetchApi(`/api/audit${qs}`)
+}
+
+// ── Backtest ───────────────────────────────────────────────────────────
+export async function runBacktest(req: BacktestRunRequest): Promise<BacktestResult> {
+  return fetchApi('/api/backtest/run', {
+    method: 'POST',
+    body: JSON.stringify(req),
   })
 }

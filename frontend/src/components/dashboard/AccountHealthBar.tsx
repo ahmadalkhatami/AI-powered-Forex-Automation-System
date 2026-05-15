@@ -3,7 +3,8 @@
 import { ProgressBar } from '@tremor/react'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
-import type { AccountHealthData } from '@/lib/types'
+import { EquityCurve } from '@/components/dashboard/EquityCurve'
+import type { AccountHealthData, TradePositionResponse } from '@/lib/types'
 
 type TremorColor = 'emerald' | 'amber' | 'red'
 type AccountHealthState = 'normal' | 'warning' | 'critical' | 'stopped'
@@ -36,9 +37,11 @@ const TIER_LABEL: Record<string, string> = {
 
 interface AccountHealthBarProps {
   data: AccountHealthData | null
+  positions?: TradePositionResponse[]
+  baselineEquity?: number
 }
 
-export function AccountHealthBar({ data }: AccountHealthBarProps) {
+export function AccountHealthBar({ data, positions = [], baselineEquity = 1000 }: AccountHealthBarProps) {
   if (!data) {
     return (
       <Card className="opacity-50">
@@ -105,6 +108,18 @@ export function AccountHealthBar({ data }: AccountHealthBarProps) {
             <p className="text-xs text-muted-foreground">Positions</p>
             <p className="font-mono font-bold text-sm">{data.openPositions}/{data.maxPositions}</p>
           </div>
+        </div>
+
+        {/* Equity curve sparkline — visualisasi cumulative P&L sejak baseline */}
+        <div className="pt-2 border-t border-border/50">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mb-1">
+            Equity curve · sejak ${baselineEquity}
+          </p>
+          <EquityCurve
+            positions={positions}
+            baseline={baselineEquity}
+            currentEquity={data.equity}
+          />
         </div>
 
         {/* Daily risk cap (Sprint 1 item 1) */}

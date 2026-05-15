@@ -6,6 +6,7 @@ import type {
   EvaluateRiskRequest,
   ExecuteTradeRequest,
   CandleBar,
+  ChartTimeframe,
   AccountHealthResponse,
   MifxStatusResponse,
 } from '@/lib/types'
@@ -73,9 +74,12 @@ export async function getAllPositions(): Promise<TradePositionResponse[]> {
 
 export async function getCandles(
   pair: string = 'EURUSD',
-  count: number = 90,
+  timeframe: ChartTimeframe = 'M15',
+  count: number = 200,
 ): Promise<CandleBar[]> {
-  return fetchApi(`/api/market/candles?pair=${pair}&count=${count}`)
+  return fetchApi(
+    `/api/market/candles?pair=${pair}&timeframe=${timeframe}&count=${count}`,
+  )
 }
 
 export async function getAccountHealth(): Promise<AccountHealthResponse> {

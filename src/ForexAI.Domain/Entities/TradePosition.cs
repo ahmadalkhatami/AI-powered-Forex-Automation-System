@@ -199,6 +199,23 @@ public class TradePosition
         ClosedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// Tandai posisi sebagai ditutup oleh broker DENGAN nilai realized profit yang akurat.
+    /// Dipanggil oleh EA setelah read HistoryDealGetDouble(DEAL_PROFIT) — mencakup
+    /// commission + swap + actual fill price (bukan estimasi dari tick terakhir).
+    /// </summary>
+    public void ClosedByBrokerWithProfit(decimal netProfit, decimal exitPrice, DateTimeOffset closedAt)
+    {
+        if (Status != TradeStatus.ACTIVE) return;
+        FloatingPnl     = Math.Round(netProfit, 2);
+        var pipValue = Direction == SignalDirection.BUY
+            ? exitPrice - Entry
+            : Entry - exitPrice;
+        FloatingPnlPips = (int)Math.Round(pipValue * 10000m);
+        Status   = netProfit >= 0m ? TradeStatus.CLOSED_WIN : TradeStatus.CLOSED_LOSS;
+        ClosedAt = closedAt;
+    }
+
     public void UpdateFloatingPnl(decimal currentPrice)
     {
         if (Status != TradeStatus.ACTIVE) return;

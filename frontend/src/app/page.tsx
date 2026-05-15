@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { RefreshCw, Cpu } from 'lucide-react'
+import { RefreshCw, Cpu, Bell, BellOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { SignalHero } from '@/components/dashboard/SignalHero'
@@ -14,6 +14,7 @@ import { PositionsList } from '@/components/dashboard/PositionsList'
 import { CandlestickChart } from '@/components/dashboard/CandlestickChart'
 import { MifxLiveTicker } from '@/components/dashboard/MifxLiveTicker'
 import { useToast } from '@/hooks/use-toast'
+import { useDashboardStream } from '@/lib/useDashboardStream'
 import {
   analyzeSignal,
   evaluateRisk,
@@ -38,12 +39,14 @@ import type {
   TradePositionResponse,
   TradeParametersResponse,
   CandleBar,
+  ChartTimeframe,
   MifxStatusResponse,
 } from '@/lib/types'
 
 const INITIAL_EQUITY = 1_000
 const PAIR = 'EURUSD'
 const TIMEFRAME = '1D'
+const CHART_CANDLE_COUNT = 200
 
 type PageState = 'loading' | 'no-signal' | 'signal-ready' | 'processing' | 'monitoring' | 'error' | 'ea-update-required'
 
@@ -163,8 +166,13 @@ export default function DashboardPage() {
   const [riskValidation, setRiskValidation] = useState<RiskValidationResponse | null>(null)
   const [positions, setPositions] = useState<TradePositionResponse[]>([])
   const [candles, setCandles] = useState<CandleBar[]>([])
+  const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('M15')
   const [mifxStatus, setMifxStatus] = useState<MifxStatusResponse | null>(null)
+  const [autoTrigger, setAutoTrigger] = useState(false)
+  const stream = useDashboardStream()
   const livePollInFlight = useRef(false)
+  const lastBarTimeRef = useRef<number | null>(null)
+  const notifiedSignalIdRef = useRef<string | null>(null)
   const [accountHealth, setAccountHealth] = useState<AccountHealthData>({
     equity: INITIAL_EQUITY,
     peakEquity: INITIAL_EQUITY,
@@ -215,7 +223,7 @@ export default function DashboardPage() {
     try {
       const [signal, candleData] = await Promise.all([
         analyzeSignal(PAIR, TIMEFRAME),
-        getCandles(PAIR, 90),
+        getCandles(PAIR, chartTimeframe, CHART_CANDLE_COUNT),
       ])
 
       setCandles(candleData)
@@ -243,7 +251,7 @@ export default function DashboardPage() {
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
       console.error('[pipeline] error:', detail, err)
-      // EA_UPDATE_REQUIRED = EA v1.14, belum di-compile ke v1.15
+      // EA_UPDATE_REQUIRED = EA versi lama tidak kirim indikator/candle (perlu v1.20+)
       if (detail.includes('EA_UPDATE_REQUIRED')) {
         setPageState('ea-update-required')
       } else {
@@ -251,7 +259,7 @@ export default function DashboardPage() {
         toast({ title: 'Connection Error', description: detail, variant: 'destructive' })
       }
     }
-  }, [toast, refreshAccountHealth, accountHealth.equity])
+  }, [toast, refreshAccountHealth, accountHealth.equity, chartTimeframe])
 
   // Load data ringan saat pertama kali buka (account health + positions, tanpa analisa)
   useEffect(() => {
@@ -259,7 +267,52 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Poll MIFX live price + posisi + account health setiap 1 detik.
+  // Fetch candle saat awal & saat user ganti timeframe — tanpa nunggu Trigger Analysis.
+  // Plus polling tiap 15 detik supaya pick up bar baru yang EA push.
+  useEffect(() => {
+    const fetchCandles = () =>
+      getCandles(PAIR, chartTimeframe, CHART_CANDLE_COUNT)
+        .then(setCandles)
+        .catch(() => {})
+    fetchCandles()
+    const id = setInterval(fetchCandles, 15_000)
+    return () => clearInterval(id)
+  }, [chartTimeframe])
+
+  // Mirror SignalR push → state utama (real-time, sub-detik latency)
+  useEffect(() => {
+    if (stream.mifxStatus) setMifxStatus(stream.mifxStatus)
+  }, [stream.mifxStatus])
+
+  useEffect(() => {
+    if (stream.positions) setPositions(stream.positions)
+  }, [stream.positions])
+
+  useEffect(() => {
+    if (stream.accountHealth) {
+      const h = stream.accountHealth
+      setAccountHealth({
+        equity: h.equity,
+        peakEquity: h.peakEquity,
+        drawdownPct: h.drawdownPct,
+        openPositions: h.openPositions,
+        maxPositions: h.maxPositions,
+        totalTrades: h.totalTrades,
+        winRate: h.winRate,
+        source: h.source,
+        riskTier: h.riskTier,
+        riskPerTradePct: h.riskPerTradePct,
+        dailyCapPct: h.dailyCapPct,
+        maxDailyTrades: h.maxDailyTrades,
+        dailyRiskUsedUsd: h.dailyRiskUsedUsd,
+        tradesOpenedToday: h.tradesOpenedToday,
+        dailyCapUtilization: h.dailyCapUtilization,
+      })
+    }
+  }, [stream.accountHealth])
+
+  // Fallback polling — interval lambat (5s) saat SignalR jalan, cepat (1s) saat tidak.
+  // Backup buat skenario: hub disconnect / EA stopped / first-load (sebelum push pertama).
   useEffect(() => {
     const poll = async () => {
       if (livePollInFlight.current) return
@@ -296,9 +349,75 @@ export default function DashboardPage() {
       }
     }
     poll()
-    const id = setInterval(poll, 1000)
+    const id = setInterval(poll, stream.isConnected ? 5000 : 1000)
     return () => clearInterval(id)
+  }, [stream.isConnected])
+
+  // Load auto-trigger preference + request notification permission
+  useEffect(() => {
+    const saved = localStorage.getItem('forexai.autoTrigger') === 'true'
+    setAutoTrigger(saved)
+    if (saved && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {})
+    }
   }, [])
+
+  const toggleAutoTrigger = useCallback(() => {
+    const next = !autoTrigger
+    setAutoTrigger(next)
+    localStorage.setItem('forexai.autoTrigger', String(next))
+    if (next && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then((perm) => {
+        if (perm === 'granted') {
+          toast({ title: '🔔 Auto-trigger aktif', description: 'Akan analisa setiap bar baru + notif GO' })
+        }
+      }).catch(() => {})
+    } else {
+      toast({
+        title: next ? '🔔 Auto-trigger aktif' : '🔕 Auto-trigger nonaktif',
+        description: next ? 'Akan analisa setiap bar baru' : 'Kembali manual',
+      })
+    }
+  }, [autoTrigger, toast])
+
+  // Auto-trigger analysis saat new bar terdeteksi (M15/H1/D1 sesuai chartTimeframe)
+  useEffect(() => {
+    if (candles.length === 0) return
+    const lastTime = candles[candles.length - 1].time
+    if (lastBarTimeRef.current === null) {
+      lastBarTimeRef.current = lastTime
+      return
+    }
+    if (lastTime <= lastBarTimeRef.current) return
+
+    lastBarTimeRef.current = lastTime
+    if (!autoTrigger) return
+
+    const hasActive = positions.some((p) => p.status === 'ACTIVE')
+    if (hasActive) return
+    if (pageState === 'loading' || pageState === 'processing') return
+
+    runFullPipeline()
+  }, [candles, autoTrigger, positions, pageState, runFullPipeline])
+
+  // Browser notification saat GO signal masuk (sekali per signal ID)
+  useEffect(() => {
+    if (!rawSignal || !riskValidation) return
+    if (riskValidation.decision === 'NO-GO') return
+    if (rawSignal.signal === 'HOLD') return
+    if (notifiedSignalIdRef.current === rawSignal.id) return
+    if (typeof window === 'undefined' || !('Notification' in window)) return
+    if (Notification.permission !== 'granted') return
+
+    notifiedSignalIdRef.current = rawSignal.id
+    const conf = (rawSignal.confidenceScore * 100).toFixed(0)
+    const tagline = riskValidation.decision === 'GO_WITH_CAUTION' ? '⚠ GO_WITH_CAUTION' : '✅ GO'
+    new Notification(`🎯 ${rawSignal.signal} ${rawSignal.pair} — ${tagline}`, {
+      body: `Entry ${rawSignal.parameters.entry.toFixed(5)} · SL ${rawSignal.parameters.stopLoss.toFixed(5)} · TP ${rawSignal.parameters.takeProfit.toFixed(5)} · Confidence ${conf}%`,
+      icon: '/favicon.ico',
+      tag: 'forexai-signal',
+    })
+  }, [rawSignal, riskValidation])
 
   const handleApprove = async () => {
     if (!rawSignal || !riskValidation) return
@@ -379,13 +498,46 @@ export default function DashboardPage() {
     }
   }
 
-  // Derived display data — prefer MIFX live mid price over Yahoo candle close
+  // Derived display data — prefer MIFX live mid price over last-candle close
   const currentPrice = mifxStatus?.connected && mifxStatus.mid
     ? mifxStatus.mid
     : candles[candles.length - 1]?.close
-  const capturedAt = rawSignal?.snapshot?.capturedAt
   const regime     = rawSignal?.snapshot?.regime ?? null
   const adx14      = rawSignal?.snapshot?.adX14  ?? null
+
+  // Overlay TP/SL/Entry untuk chart — prioritas: posisi aktif > validated params > signal params
+  const activePosition = positions.find((p) => p.status === 'ACTIVE')
+  const tradeOverlay = activePosition
+    ? {
+        entry:        activePosition.entry,
+        stopLoss:     activePosition.stopLoss,
+        takeProfit:   activePosition.takeProfit,
+        direction:    activePosition.direction === 'SELL' ? ('SELL' as const) : ('BUY' as const),
+        livePnlPips:  activePosition.floatingPnlPips,
+        livePnlUsd:   activePosition.floatingPnl,
+      }
+    : riskValidation?.validatedParameters && rawSignal && rawSignal.signal !== 'HOLD'
+      ? {
+          entry:      riskValidation.validatedParameters.entry,
+          stopLoss:   riskValidation.validatedParameters.stopLoss,
+          takeProfit: riskValidation.validatedParameters.takeProfit,
+          direction:  rawSignal.signal,
+        }
+      : rawSignal && rawSignal.signal !== 'HOLD'
+        ? {
+            entry:      rawSignal.parameters.entry,
+            stopLoss:   rawSignal.parameters.stopLoss,
+            takeProfit: rawSignal.parameters.takeProfit,
+            direction:  rawSignal.signal,
+          }
+        : null
+
+  const structureOverlay = rawSignal
+    ? {
+        nearestSupport:    rawSignal.structure.nearestSupport,
+        nearestResistance: rawSignal.structure.nearestResistance,
+      }
+    : null
 
   const heroData = rawSignal ? mapToSignalHeroData(rawSignal, riskValidation, accountHealth.equity) : null
   const analysisData = rawSignal ? mapToSignalAnalysisData(rawSignal) : null
@@ -417,11 +569,11 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-medium">EUR/USD</span>
             <span className="text-xs text-muted-foreground">·</span>
-            <span className="text-xs text-muted-foreground">Daily</span>
+            <span className="text-xs text-muted-foreground">{chartTimeframe}</span>
             <span className="text-xs text-muted-foreground">·</span>
             {/* Live MIFX ticker — menggantikan harga statis */}
             <MifxLiveTicker status={mifxStatus} />
-            {/* Fallback: tampilkan harga Yahoo jika MIFX offline */}
+            {/* Fallback: last-candle close jika MIFX offline */}
             {!mifxStatus?.connected && currentPrice && (
               <span className="text-sm font-mono font-semibold text-muted-foreground">
                 {currentPrice.toFixed(5)}
@@ -455,6 +607,16 @@ export default function DashboardPage() {
             <Button
               variant="outline"
               size="sm"
+              onClick={toggleAutoTrigger}
+              className={cn('gap-2', autoTrigger && 'border-emerald-500/60 text-emerald-600 dark:text-emerald-400')}
+              title={autoTrigger ? 'Klik untuk matikan auto-trigger' : 'Auto-analyze tiap bar baru + browser notif'}
+            >
+              {autoTrigger ? <Bell className="h-3.5 w-3.5" /> : <BellOff className="h-3.5 w-3.5" />}
+              {autoTrigger ? 'Auto ON' : 'Auto OFF'}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               onClick={runFullPipeline}
               disabled={pageState === 'loading' || pageState === 'processing'}
               className="gap-2"
@@ -469,17 +631,24 @@ export default function DashboardPage() {
         <CandlestickChart
           candles={candles}
           pair="EUR/USD"
-          capturedAt={capturedAt}
+          timeframe={chartTimeframe}
+          livePrice={mifxStatus?.connected ? mifxStatus.mid : null}
+          tradeOverlay={tradeOverlay}
+          structure={structureOverlay}
+          positions={positions}
+          onTimeframeChange={setChartTimeframe}
+          isMifxConnected={mifxStatus?.connected ?? false}
         />
 
         {/* EA update required banner */}
         {pageState === 'ea-update-required' && (
           <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 space-y-2">
-            <p className="text-sm font-semibold text-amber-500">EA v1.15 belum di-compile</p>
+            <p className="text-sm font-semibold text-amber-500">EA belum versi terbaru (v1.20+)</p>
             <p className="text-xs text-muted-foreground">
-              ForexAI_Bridge masih v1.14 dan belum bisa mengirim indikator (MA/RSI/S/R) ke backend.
+              ForexAI_Bridge belum mengirim indikator/candle lengkap ke backend. Perlu compile ulang.
             </p>
             <ol className="text-xs text-muted-foreground list-decimal list-inside space-y-1">
+              <li>Klik tombol <strong>Update EA</strong> di atas (auto copy + compile), <em>atau</em>:</li>
               <li>Di MT5, tekan <strong>F4</strong> untuk buka MetaEditor</li>
               <li>File → Open → pilih <strong>ForexAI_Bridge.mq5</strong></li>
               <li>Tekan <strong>F7</strong> untuk compile</li>
@@ -513,7 +682,11 @@ export default function DashboardPage() {
       </div>
 
       <div className="space-y-4">
-        <AccountHealthBar data={accountHealth} />
+        <AccountHealthBar
+          data={accountHealth}
+          positions={positions}
+          baselineEquity={INITIAL_EQUITY}
+        />
         <PositionsList
           positions={positionCards.length > 0 ? positionCards : null}
           currentPrice={currentPrice}

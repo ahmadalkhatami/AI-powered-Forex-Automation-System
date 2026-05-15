@@ -1,5 +1,5 @@
-using ForexAI.Domain.Interfaces;
 using ForexAI.Domain.ValueObjects;
+using ForexAI.Infrastructure.Mifx;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ForexAI.API.Controllers;
@@ -8,17 +8,22 @@ namespace ForexAI.API.Controllers;
 [Route("api/market")]
 public class MarketController : ControllerBase
 {
-    private readonly ICandleDataService _candles;
+    private readonly MifxCandleFeed _feed;
 
-    public MarketController(ICandleDataService candles) => _candles = candles;
+    public MarketController(MifxCandleFeed feed) => _feed = feed;
 
     [HttpGet("candles")]
-    public async Task<ActionResult<IReadOnlyList<CandleBar>>> GetCandles(
+    public ActionResult<IReadOnlyList<CandleBar>> GetCandles(
         [FromQuery] string pair = "EURUSD",
-        [FromQuery] int count = 90,
+        [FromQuery] string timeframe = "M15",
+        [FromQuery] int count = 200,
         CancellationToken ct = default)
     {
-        var result = await _candles.GetCandlesAsync(pair, count);
-        return Ok(result);
+        var tf = timeframe.ToUpperInvariant();
+        if (tf is not ("M15" or "H1" or "D1"))
+            return BadRequest(new { error = $"Timeframe '{timeframe}' tidak didukung. Pakai M15, H1, atau D1." });
+
+        var candles = _feed.Get(pair, tf, count);
+        return Ok(candles);
     }
 }

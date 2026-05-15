@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using ForexAI.API.Hubs;
 using ForexAI.Application;
 using ForexAI.Infrastructure;
 
@@ -11,11 +12,20 @@ builder.Services.AddControllers()
         opts.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     });
 
+builder.Services.AddSignalR()
+    .AddJsonProtocol(opts =>
+    {
+        opts.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+        opts.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
+
+// SignalR butuh AllowCredentials → tidak boleh pakai AllowAnyOrigin
 builder.Services.AddCors(opts =>
     opts.AddDefaultPolicy(p => p
         .WithOrigins("http://localhost:3000", "http://localhost:3001")
         .AllowAnyHeader()
-        .AllowAnyMethod()));
+        .AllowAnyMethod()
+        .AllowCredentials()));
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
@@ -42,6 +52,7 @@ app.UseExceptionHandler(appBuilder => appBuilder.Run(async ctx =>
 
 app.UseCors();
 app.MapControllers();
+app.MapHub<DashboardHub>("/hub/dashboard");
 app.Run("http://localhost:8080");
 
 public partial class Program { }

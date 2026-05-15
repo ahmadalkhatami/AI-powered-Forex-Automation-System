@@ -11,15 +11,16 @@
 //|  4. Drag EA ke chart EURUSD.m,M15                               |
 //+------------------------------------------------------------------+
 #property copyright "ForexAI"
-#property version   "1.19"
-#property description "ForexAI price bridge + indicators + order executor + close-order sync"
+#property version   "1.21"
+#property description "ForexAI price bridge + indicators + candle stream + order executor + actual-close-profit sync"
 
 //--- Input parameters
-input string   BackendUrl  = "http://127.0.0.1:5033";  // URL backend ForexAI
-input string   TradePair   = "EURUSD.m";               // Pair yang di-track (Monex pakai .m suffix)
-input int      TimerMs     = 1000;                     // Interval kirim tick (ms)
-input int      MagicNumber = 20260101;                 // Magic number untuk order EA ini
-input int      SRLookback  = 20;                       // Lookback bars untuk Support/Resistance
+input string   BackendUrl   = "http://127.0.0.1:5033";  // URL backend ForexAI
+input string   TradePair    = "EURUSD.m";               // Pair yang di-track (Monex pakai .m suffix)
+input int      TimerMs      = 1000;                     // Interval kirim tick (ms)
+input int      MagicNumber  = 20260101;                 // Magic number untuk order EA ini
+input int      SRLookback   = 20;                       // Lookback bars untuk Support/Resistance
+input int      CandleCount  = 200;                      // Jumlah bar candle dikirim per push
 
 //--- Indicator handles (dibuat sekali di OnInit)
 int g_ma20m15 = INVALID_HANDLE;
@@ -32,6 +33,10 @@ int g_adx14   = INVALID_HANDLE;
 
 //--- State
 string   g_pendingCommandId = "";
+datetime g_lastBarTimeM15   = 0;
+datetime g_lastBarTimeH1    = 0;
+datetime g_lastBarTimeD1    = 0;
+ulong    g_lastOpenTickets[];    // Ticket open di tick sebelumnya — untuk deteksi posisi yang baru close
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -74,11 +79,20 @@ int OnInit()
       return INIT_FAILED;
    }
 
-   Print("[ForexAI] Bridge aktif v1.19 — pair: ", TradePair, " | backend: ", BackendUrl,
+   Print("[ForexAI] Bridge aktif v1.21 — pair: ", TradePair, " | backend: ", BackendUrl,
          " | balance: ", AccountInfoDouble(ACCOUNT_BALANCE),
          " | equity: ", AccountInfoDouble(ACCOUNT_EQUITY));
 
    SendStatus("CONNECTED");
+
+   // Push initial candles untuk semua timeframe yang dipakai dashboard
+   SendCandles(PERIOD_M15, "M15");
+   SendCandles(PERIOD_H1,  "H1");
+   SendCandles(PERIOD_D1,  "D1");
+   g_lastBarTimeM15 = iTime(TradePair, PERIOD_M15, 0);
+   g_lastBarTimeH1  = iTime(TradePair, PERIOD_H1,  0);
+   g_lastBarTimeD1  = iTime(TradePair, PERIOD_D1,  0);
+
    return INIT_SUCCEEDED;
 }
 
@@ -107,6 +121,7 @@ void OnTimer()
 {
    CheckForCommand();
    SendLatestTick();
+   SendCandlesIfNewBar();
 }
 
 //+------------------------------------------------------------------+
@@ -164,6 +179,8 @@ void SendLatestTick()
 
    // ── Format JSON dan kirim ke backend ────────────────────────────
    string positions = BuildPositionsJson();
+   // Setelah build, deteksi ticket yang baru saja close dan kirim realized profit
+   DetectAndReportClosedPositions();
    string json = StringFormat(
       "{\"pair\":\"%s\",\"bid\":%.5f,\"ask\":%.5f,\"time\":%d,"
       "\"balance\":%.2f,\"equity\":%.2f,"
@@ -189,6 +206,73 @@ void SendLatestTick()
 
    if(code < 0)
       Print("[ForexAI] SendTick error: ", GetLastError());
+}
+
+//+------------------------------------------------------------------+
+//| Cek new bar setiap timeframe, kirim ulang candle saat bar baru   |
+//+------------------------------------------------------------------+
+void SendCandlesIfNewBar()
+{
+   datetime t = iTime(TradePair, PERIOD_M15, 0);
+   if(t != 0 && t != g_lastBarTimeM15)
+   {
+      g_lastBarTimeM15 = t;
+      SendCandles(PERIOD_M15, "M15");
+   }
+
+   t = iTime(TradePair, PERIOD_H1, 0);
+   if(t != 0 && t != g_lastBarTimeH1)
+   {
+      g_lastBarTimeH1 = t;
+      SendCandles(PERIOD_H1, "H1");
+   }
+
+   t = iTime(TradePair, PERIOD_D1, 0);
+   if(t != 0 && t != g_lastBarTimeD1)
+   {
+      g_lastBarTimeD1 = t;
+      SendCandles(PERIOD_D1, "D1");
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Kirim N candle terakhir untuk timeframe tertentu ke backend       |
+//+------------------------------------------------------------------+
+void SendCandles(ENUM_TIMEFRAMES tf, string tfLabel)
+{
+   MqlRates rates[];
+   ArraySetAsSeries(rates, false);  // index 0 = oldest, index N-1 = newest
+   int copied = CopyRates(TradePair, tf, 0, CandleCount, rates);
+   if(copied <= 0)
+   {
+      Print("[ForexAI] SendCandles ", tfLabel, " gagal copy rates: ", GetLastError());
+      return;
+   }
+
+   string body = "[";
+   for(int i = 0; i < copied; i++)
+   {
+      if(i > 0) body += ",";
+      body += StringFormat(
+         "{\"time\":%d,\"open\":%.5f,\"high\":%.5f,\"low\":%.5f,\"close\":%.5f,\"volume\":%d}",
+         (long)rates[i].time,
+         rates[i].open, rates[i].high, rates[i].low, rates[i].close,
+         (long)rates[i].tick_volume);
+   }
+   body += "]";
+
+   string headers = "Content-Type: application/json\r\n";
+   char   bodyArr[], resp[];
+   string respHeaders;
+   StringToCharArray(body, bodyArr, 0, StringLen(body));
+
+   string url = StringFormat("%s/api/mifx/candles?pair=%s&timeframe=%s",
+                              BackendUrl, TradePair, tfLabel);
+   int code = WebRequest("POST", url, headers, 5000, bodyArr, resp, respHeaders);
+
+   if(code != 200)
+      Print("[ForexAI] SendCandles ", tfLabel, " HTTP ", code,
+            " err=", GetLastError());
 }
 
 //+------------------------------------------------------------------+
@@ -427,6 +511,122 @@ string BuildPositionsJson()
 
    result += "]";
    return result;
+}
+
+//+------------------------------------------------------------------+
+//| Deteksi ticket yang baru saja close vs tick sebelumnya,          |
+//| baca actual realized profit dari history, kirim ke backend       |
+//+------------------------------------------------------------------+
+void DetectAndReportClosedPositions()
+{
+   // Collect ticket open saat ini (filtered by MagicNumber)
+   ulong currentTickets[];
+   int total = PositionsTotal();
+   for(int i = 0; i < total; i++)
+   {
+      ulong t = PositionGetTicket(i);
+      if(t == 0) continue;
+      if(PositionGetInteger(POSITION_MAGIC) != MagicNumber) continue;
+      int sz = ArraySize(currentTickets);
+      ArrayResize(currentTickets, sz + 1);
+      currentTickets[sz] = t;
+   }
+
+   // Untuk setiap ticket di g_lastOpenTickets yang TIDAK ada di currentTickets → baru close
+   int lastSize = ArraySize(g_lastOpenTickets);
+   for(int i = 0; i < lastSize; i++)
+   {
+      ulong oldTicket = g_lastOpenTickets[i];
+      bool stillOpen = false;
+      for(int j = 0; j < ArraySize(currentTickets); j++)
+      {
+         if(currentTickets[j] == oldTicket) { stillOpen = true; break; }
+      }
+      if(!stillOpen)
+         ReportClosedDealFromHistory(oldTicket);
+   }
+
+   // Update snapshot untuk tick berikutnya
+   ArrayResize(g_lastOpenTickets, ArraySize(currentTickets));
+   for(int i = 0; i < ArraySize(currentTickets); i++)
+      g_lastOpenTickets[i] = currentTickets[i];
+}
+
+//+------------------------------------------------------------------+
+//| Cari close deal di history untuk position_id tertentu,           |
+//| kumpulkan profit + commission + swap, POST ke backend            |
+//+------------------------------------------------------------------+
+void ReportClosedDealFromHistory(ulong positionId)
+{
+   // Select history 24 jam terakhir
+   if(!HistorySelect(TimeCurrent() - 86400, TimeCurrent() + 60))
+   {
+      Print("[ForexAI] HistorySelect gagal: ", GetLastError());
+      return;
+   }
+
+   double realizedProfit  = 0.0;
+   double commission      = 0.0;
+   double swap            = 0.0;
+   double closePrice      = 0.0;
+   long   closeTime       = 0;
+   bool   foundCloseDeal  = false;
+
+   int dealsTotal = HistoryDealsTotal();
+   for(int i = 0; i < dealsTotal; i++)
+   {
+      ulong dealTicket = HistoryDealGetTicket(i);
+      if(dealTicket == 0) continue;
+      if((ulong)HistoryDealGetInteger(dealTicket, DEAL_POSITION_ID) != positionId) continue;
+
+      double dealProfit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+      double dealComm   = HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
+      double dealSwap   = HistoryDealGetDouble(dealTicket, DEAL_SWAP);
+      realizedProfit += dealProfit;
+      commission     += dealComm;
+      swap           += dealSwap;
+
+      // DEAL_ENTRY_OUT = deal yang menutup posisi (juga handle partial close)
+      int entryType = (int)HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+      if(entryType == DEAL_ENTRY_OUT || entryType == DEAL_ENTRY_OUT_BY)
+      {
+         closePrice     = HistoryDealGetDouble(dealTicket, DEAL_PRICE);
+         closeTime      = (long)HistoryDealGetInteger(dealTicket, DEAL_TIME);
+         foundCloseDeal = true;
+      }
+   }
+
+   if(!foundCloseDeal)
+   {
+      Print("[ForexAI] Tidak ditemukan DEAL_ENTRY_OUT untuk position ", positionId,
+            " — mungkin terlalu lama (>24 jam)");
+      return;
+   }
+
+   double netProfit = realizedProfit + commission + swap;
+
+   string json = StringFormat(
+      "{\"ticket\":%s,\"netProfit\":%.2f,\"grossProfit\":%.2f,"
+      "\"commission\":%.2f,\"swap\":%.2f,"
+      "\"closePrice\":%.5f,\"closeTime\":%d}",
+      IntegerToString((long)positionId),
+      netProfit, realizedProfit, commission, swap, closePrice, closeTime);
+
+   Print("[ForexAI] Reporting actual close profit untuk position ", positionId,
+         ": net=$", netProfit, " gross=$", realizedProfit,
+         " commission=$", commission, " swap=$", swap, " @ ", closePrice);
+
+   string headers = "Content-Type: application/json\r\n";
+   char   body[], resp[];
+   string respHeaders;
+   StringToCharArray(json, body, 0, StringLen(json));
+
+   int code = WebRequest("POST",
+      BackendUrl + "/api/mifx/closed-position",
+      headers, 5000, body, resp, respHeaders);
+
+   if(code != 200)
+      Print("[ForexAI] /closed-position HTTP ", code, " err=", GetLastError());
 }
 
 //+------------------------------------------------------------------+

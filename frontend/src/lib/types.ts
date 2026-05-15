@@ -24,7 +24,10 @@ export interface CandleBar {
   high: number
   low: number
   close: number
+  volume?: number | null
 }
+
+export type ChartTimeframe = 'M15' | 'H1' | 'D1'
 
 export interface MifxStatusResponse {
   connected: boolean

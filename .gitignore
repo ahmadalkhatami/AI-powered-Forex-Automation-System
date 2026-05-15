@@ -13,6 +13,9 @@ project.lock.json
 # Runtime data (changes on every test/execution run)
 _bmad-output/implementation-artifacts/execution-log.json
 _bmad-output/implementation-artifacts/position-status.json
+_bmad-output/implementation-artifacts/mifx-candle-cache.json
+# Accidental cache if dotnet run was started from src/ForexAI.API
+src/ForexAI.API/_bmad-output/
 
 # Generated HTML previews
 _bmad-output/planning-artifacts/*.html

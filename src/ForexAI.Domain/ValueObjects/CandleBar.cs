@@ -5,5 +5,6 @@ public record CandleBar(
     decimal Open,
     decimal High,
     decimal Low,
-    decimal Close
+    decimal Close,
+    long? Volume = null
 );

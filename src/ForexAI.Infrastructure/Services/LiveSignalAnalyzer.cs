@@ -7,7 +7,7 @@ using ForexAI.Domain.ValueObjects;
 namespace ForexAI.Infrastructure.Services;
 
 /// <summary>
-/// Menganalisis sinyal trading secara real-time dari data pasar live (Yahoo Finance + MIFX).
+/// Menganalisis sinyal trading secara real-time dari data MIFX EA (MT5).
 /// Menggantikan BmadSignalAnalyzer yang membaca dari file JSON statis.
 /// Semua score dihitung ulang setiap kali Trigger Analysis dipanggil.
 /// </summary>

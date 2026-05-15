@@ -82,69 +82,94 @@ success "Password ditemukan di Keychain"
 BE_LOG="/tmp/forexai-backend.log"
 FE_LOG="/tmp/forexai-fe.log"
 
-# ── Start Backend jika belum jalan ────────────────────────────────────────────
+# ── Helper: kill process(es) yang nge-hold port tertentu ─────────────────────
+kill_port() {
+    local port=$1
+    local label=$2
+    local pids
+    pids=$(lsof -ti tcp:"$port" 2>/dev/null || true)
+    if [[ -n "$pids" ]]; then
+        info "Menghentikan $label di port $port (PID: $(echo "$pids" | tr '\n' ' '))..."
+        echo "$pids" | xargs kill -TERM 2>/dev/null || true
+        # Tunggu sampai port free atau max 8 detik, baru SIGKILL
+        for i in $(seq 1 8); do
+            sleep 1
+            if ! lsof -ti tcp:"$port" > /dev/null 2>&1; then
+                success "$label dihentikan"
+                return 0
+            fi
+        done
+        # Masih ada — paksa kill
+        lsof -ti tcp:"$port" 2>/dev/null | xargs kill -KILL 2>/dev/null || true
+        sleep 1
+        success "$label dipaksa-stop (SIGKILL)"
+    fi
+}
+
+# ── Start Backend (selalu restart jika sudah jalan) ──────────────────────────
 step "Step 0a — Backend (ForexAI API)"
 if curl -s --max-time 2 http://localhost:8080/api/mifx/status > /dev/null 2>&1; then
-    success "Backend sudah berjalan di :8080"
-else
-    info "Backend belum jalan — build & start..."
-    cd "$PROJECT_DIR"
-    # Build dulu (--no-incremental supaya perubahan terbaru selalu masuk)
-    dotnet build ForexAI.sln --nologo -v quiet --no-incremental 2>&1 | tail -2
-    nohup dotnet run --project src/ForexAI.API/ForexAI.API.csproj --no-build \
-        > "$BE_LOG" 2>&1 &
-    BE_PID=$!
-    echo -n "  Menunggu backend siap"
-    for i in $(seq 1 20); do
-        sleep 1; echo -n "."
-        if curl -s --max-time 1 http://localhost:8080/api/mifx/status > /dev/null 2>&1; then
-            break
-        fi
-    done
-    echo ""
-    if curl -s --max-time 2 http://localhost:8080/api/mifx/status > /dev/null 2>&1; then
-        success "Backend aktif di http://localhost:8080 (PID $BE_PID)"
-    else
-        warn "Backend lambat start — log: $BE_LOG"
-    fi
+    info "Backend sedang berjalan — restart untuk pick up perubahan terbaru"
+    kill_port 8080 "Backend"
 fi
 
-# ── Start Frontend jika belum jalan ───────────────────────────────────────────
+info "Build & start backend..."
+cd "$PROJECT_DIR"
+# Build dulu (--no-incremental supaya perubahan terbaru selalu masuk)
+dotnet build ForexAI.sln --nologo -v quiet --no-incremental 2>&1 | tail -2
+nohup dotnet run --project src/ForexAI.API/ForexAI.API.csproj --no-build \
+    > "$BE_LOG" 2>&1 &
+BE_PID=$!
+echo -n "  Menunggu backend siap"
+for i in $(seq 1 20); do
+    sleep 1; echo -n "."
+    if curl -s --max-time 1 http://localhost:8080/api/mifx/status > /dev/null 2>&1; then
+        break
+    fi
+done
+echo ""
+if curl -s --max-time 2 http://localhost:8080/api/mifx/status > /dev/null 2>&1; then
+    success "Backend aktif di http://localhost:8080 (PID $BE_PID)"
+else
+    warn "Backend lambat start — log: $BE_LOG"
+fi
+
+# ── Start Frontend (selalu restart jika sudah jalan) ─────────────────────────
 step "Step 0b — Frontend (Dashboard)"
 FE_DIR="$PROJECT_DIR/frontend"
 if curl -s --max-time 2 http://localhost:3000 > /dev/null 2>&1; then
-    success "Frontend sudah berjalan di :3000"
+    info "Frontend sedang berjalan — restart untuk pick up perubahan terbaru"
+    kill_port 3000 "Frontend"
+fi
+
+info "Build & start frontend..."
+cd "$FE_DIR"
+# Build Next.js (jika .next/BUILD_ID tidak ada atau stale)
+if [ ! -f "$FE_DIR/.next/BUILD_ID" ] || \
+   find "$FE_DIR/src" -newer "$FE_DIR/.next/BUILD_ID" -name "*.tsx" -o -name "*.ts" 2>/dev/null | grep -q .; then
+    info "Build frontend (30-60 detik)..."
+    if npm run build > /tmp/forexai-fe-build.log 2>&1; then
+        success "Frontend build OK"
+    else
+        warn "Build error — lihat /tmp/forexai-fe-build.log"
+    fi
 else
-    info "Frontend belum jalan — build & start..."
-    cd "$FE_DIR"
-    # Build Next.js (jika .next/BUILD_ID tidak ada atau stale)
-    if [ ! -f "$FE_DIR/.next/BUILD_ID" ] || \
-       find "$FE_DIR/src" -newer "$FE_DIR/.next/BUILD_ID" -name "*.tsx" -o -name "*.ts" 2>/dev/null | grep -q .; then
-        info "Build frontend (30-60 detik)..."
-        npm run build > /tmp/forexai-fe-build.log 2>&1
-        if [ $? -eq 0 ]; then
-            success "Frontend build OK"
-        else
-            warn "Build error — lihat /tmp/forexai-fe-build.log"
-        fi
-    else
-        info "Build sudah up-to-date — skip rebuild"
+    info "Build sudah up-to-date — skip rebuild"
+fi
+nohup npm start > "$FE_LOG" 2>&1 &
+FE_PID=$!
+echo -n "  Menunggu frontend siap"
+for i in $(seq 1 20); do
+    sleep 1; echo -n "."
+    if curl -s --max-time 1 http://localhost:3000 > /dev/null 2>&1; then
+        break
     fi
-    nohup npm start > "$FE_LOG" 2>&1 &
-    FE_PID=$!
-    echo -n "  Menunggu frontend siap"
-    for i in $(seq 1 20); do
-        sleep 1; echo -n "."
-        if curl -s --max-time 1 http://localhost:3000 > /dev/null 2>&1; then
-            break
-        fi
-    done
-    echo ""
-    if curl -s --max-time 2 http://localhost:3000 > /dev/null 2>&1; then
-        success "Dashboard aktif di http://localhost:3000 (PID $FE_PID)"
-    else
-        warn "Frontend lambat start — log: $FE_LOG"
-    fi
+done
+echo ""
+if curl -s --max-time 2 http://localhost:3000 > /dev/null 2>&1; then
+    success "Dashboard aktif di http://localhost:3000 (PID $FE_PID)"
+else
+    warn "Frontend lambat start — log: $FE_LOG"
 fi
 cd "$PROJECT_DIR"
 

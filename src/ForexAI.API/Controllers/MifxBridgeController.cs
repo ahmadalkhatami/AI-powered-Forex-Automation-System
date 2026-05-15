@@ -1,6 +1,12 @@
+using ForexAI.API.Hubs;
+using ForexAI.Application.UseCases.GetAccountHealth;
+using ForexAI.Application.UseCases.GetAllPositions;
+using ForexAI.Domain.Interfaces;
 using ForexAI.Domain.ValueObjects;
 using ForexAI.Infrastructure.Mifx;
+using MediatR;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 
 namespace ForexAI.API.Controllers;
 
@@ -52,6 +58,27 @@ public record MifxOrderResultRequest(
     int Retcode
 );
 
+/// <summary>Satu candle bar dari EA (OHLCV)</summary>
+public record MifxCandleDto(
+    long    Time,    // Unix timestamp detik
+    decimal Open,
+    decimal High,
+    decimal Low,
+    decimal Close,
+    long?   Volume = null
+);
+
+/// <summary>Actual realized close profit dari EA history (DEAL_ENTRY_OUT)</summary>
+public record MifxClosedPositionRequest(
+    long    Ticket,         // MT5 position id
+    decimal NetProfit,      // Gross + commission + swap (net realized)
+    decimal GrossProfit,
+    decimal Commission,
+    decimal Swap,
+    decimal ClosePrice,     // Actual fill price dari deal history
+    long    CloseTime       // Unix timestamp detik
+);
+
 // ── Controller ─────────────────────────────────────────────────────
 
 [ApiController]
@@ -59,20 +86,32 @@ public record MifxOrderResultRequest(
 public class MifxBridgeController : ControllerBase
 {
     private readonly MifxPriceFeed            _feed;
+    private readonly MifxCandleFeed           _candleFeed;
     private readonly MifxCommandQueue         _queue;
     private readonly MifxPositionSyncService  _syncService;
+    private readonly ITradePositionRepository _positionRepo;
+    private readonly IHubContext<DashboardHub> _hub;
+    private readonly IMediator                _mediator;
     private readonly ILogger<MifxBridgeController> _logger;
 
     public MifxBridgeController(
         MifxPriceFeed feed,
+        MifxCandleFeed candleFeed,
         MifxCommandQueue queue,
         MifxPositionSyncService syncService,
+        ITradePositionRepository positionRepo,
+        IHubContext<DashboardHub> hub,
+        IMediator mediator,
         ILogger<MifxBridgeController> logger)
     {
-        _feed        = feed;
-        _queue       = queue;
-        _syncService = syncService;
-        _logger      = logger;
+        _feed         = feed;
+        _candleFeed   = candleFeed;
+        _queue        = queue;
+        _syncService  = syncService;
+        _positionRepo = positionRepo;
+        _hub          = hub;
+        _mediator     = mediator;
+        _logger       = logger;
     }
 
     // ── Dipanggil EA setiap detik: kirim bid/ask terbaru + posisi open ──
@@ -110,7 +149,97 @@ public class MifxBridgeController : ControllerBase
         if (req.Positions is not null)
             await _syncService.SyncAsync(brokerPositions ?? Array.Empty<MifxBrokerPosition>());
 
+        // Broadcast ke dashboard via SignalR — best-effort, jangan blokir EA jika error
+        try
+        {
+            var tickPayload = BuildStatusResponse();
+            await _hub.Clients.All.SendAsync("tick", tickPayload);
+
+            var positions = await _mediator.Send(new GetAllPositionsQuery());
+            await _hub.Clients.All.SendAsync("positions", positions);
+
+            var account = await _mediator.Send(new GetAccountHealthQuery());
+            await _hub.Clients.All.SendAsync("account", account);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SignalR broadcast gagal — dashboard akan fallback ke polling");
+        }
+
         return Ok();
+    }
+
+    // ── Dipanggil EA saat detect ticket hilang dari open positions ─────────────
+    // EA baca DEAL_PROFIT dari history → backend simpan realized profit yang akurat
+    // (mencakup commission + swap + actual fill price, bukan estimasi dari tick terakhir).
+
+    [HttpPost("closed-position")]
+    public async Task<IActionResult> ReportClosedPosition([FromBody] MifxClosedPositionRequest req)
+    {
+        var externalId = $"MIFX-{req.Ticket}";
+        var openPositions = await _positionRepo.GetOpenPositionsAsync();
+        var position = openPositions.FirstOrDefault(p =>
+            string.Equals(p.ExternalTradeId, externalId, StringComparison.OrdinalIgnoreCase));
+
+        if (position is null)
+        {
+            _logger.LogInformation(
+                "Closed-position report untuk ticket {Ticket} di-skip — posisi tidak ditemukan di state ACTIVE " +
+                "(mungkin sudah ditutup manual dari dashboard atau MagicNumber mismatch)",
+                req.Ticket);
+            return Ok(new { skipped = true });
+        }
+
+        var closedAt = DateTimeOffset.FromUnixTimeSeconds(req.CloseTime);
+        position.ClosedByBrokerWithProfit(req.NetProfit, req.ClosePrice, closedAt);
+        await _positionRepo.SaveAsync(position);
+
+        _logger.LogInformation(
+            "Position {Id} ({Pair} {Dir}) closed dengan ACTUAL profit ${Net:F2} " +
+            "(gross ${Gross:F2}, commission ${Comm:F2}, swap ${Swap:F2}) @ {Price} — outcome={Outcome}",
+            position.TradeId, position.Pair, position.Direction,
+            req.NetProfit, req.GrossProfit, req.Commission, req.Swap, req.ClosePrice, position.Status);
+
+        // Broadcast positions + account terbaru ke dashboard
+        try
+        {
+            var positions = await _mediator.Send(new GetAllPositionsQuery());
+            await _hub.Clients.All.SendAsync("positions", positions);
+            var account = await _mediator.Send(new GetAccountHealthQuery());
+            await _hub.Clients.All.SendAsync("account", account);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SignalR broadcast setelah closed-position gagal");
+        }
+
+        return Ok(new { tradeId = position.TradeId, netProfit = req.NetProfit });
+    }
+
+    // ── Dipanggil EA saat new bar / startup: kirim N candle terakhir untuk chart ──
+
+    [HttpPost("candles")]
+    public IActionResult IngestCandles(
+        [FromQuery] string pair,
+        [FromQuery] string timeframe,
+        [FromBody]  List<MifxCandleDto> bars)
+    {
+        if (string.IsNullOrWhiteSpace(pair) || string.IsNullOrWhiteSpace(timeframe))
+            return BadRequest(new { error = "pair dan timeframe wajib diisi" });
+        if (bars is null || bars.Count == 0)
+            return BadRequest(new { error = "body bars kosong" });
+
+        var candles = bars
+            .Select(b => new CandleBar(b.Time, b.Open, b.High, b.Low, b.Close, b.Volume))
+            .ToList()
+            .AsReadOnly();
+
+        _candleFeed.Upsert(pair, timeframe, candles);
+
+        _logger.LogDebug("MIFX candles ingested: {Pair} {TF} count={Count}",
+            pair, timeframe, candles.Count);
+
+        return Ok(new { count = candles.Count });
     }
 
     // ── Dipanggil EA setiap detik: ambil perintah order (jika ada) ─
@@ -159,10 +288,12 @@ public class MifxBridgeController : ControllerBase
     // ── Dipanggil Frontend untuk tampilkan live price ─────────────
 
     [HttpGet("status")]
-    public IActionResult GetStatus()
+    public IActionResult GetStatus() => Ok(BuildStatusResponse());
+
+    private object BuildStatusResponse()
     {
         var tick = _feed.Latest;
-        return Ok(new
+        return new
         {
             connected      = _feed.IsConnected,
             pair           = tick?.Pair,
@@ -173,6 +304,6 @@ public class MifxBridgeController : ControllerBase
             time           = tick?.Time,
             accountBalance = tick?.AccountBalance,
             accountEquity  = tick?.AccountEquity,
-        });
+        };
     }
 }

@@ -1,0 +1,40 @@
+{
+  "snapshot_at": "2026-05-05T14:50:00+07:00",
+  "mode": "SIMULATION",
+  "run_id": "RUN-20260505-002",
+  "agent": "Axis",
+
+  "account_snapshot": {
+    "equity": 10000,
+    "open_positions": 1,
+    "max_positions": 2,
+    "used_risk": 98.40,
+    "used_risk_pct": 0.984,
+    "available_risk_slots": 1,
+    "floating_pnl_total": 45.10,
+    "equity_with_floating": 10045.10
+  },
+
+  "open_positions": [
+    {
+      "trade_id": "SIM-20260505-002",
+      "pair": "EUR/USD",
+      "direction": "BUY",
+      "lot_size": 0.41,
+      "entry_price": 1.1268,
+      "current_price": 1.1279,
+      "stop_loss": 1.1244,
+      "take_profit": 1.1313,
+      "floating_pnl": 45.10,
+      "floating_pnl_pips": 11,
+      "distance_to_tp_pips": 34,
+      "distance_to_sl_pips": 35,
+      "status": "ACTIVE",
+      "opened_at": "2026-05-05T14:42:00+07:00",
+      "session": "London Open"
+    }
+  ],
+
+  "closed_positions_today": 0,
+  "skipped_today": 1
+}

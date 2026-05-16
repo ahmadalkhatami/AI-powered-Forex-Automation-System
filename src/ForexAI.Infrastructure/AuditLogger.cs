@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ForexAI.Domain.Interfaces;
 
 namespace ForexAI.Infrastructure;
 
@@ -19,13 +20,23 @@ public record AuditEvent(
 public class AuditLogger
 {
     private const int MaxEvents = 10_000;
-    private readonly string _path;
+    private readonly IModeService _mode;
     private readonly object _lock = new();
 
-    public AuditLogger()
+    private string _path
     {
-        Directory.CreateDirectory(ProjectPaths.ImplementationArtifactsDir);
-        _path = Path.Combine(ProjectPaths.ImplementationArtifactsDir, "audit-log.jsonl");
+        get
+        {
+            var dir = ProjectPaths.GetImplementationArtifactsDir(_mode.CurrentMode);
+            Directory.CreateDirectory(dir);
+            return Path.Combine(dir, "audit-log.jsonl");
+        }
+    }
+
+    public AuditLogger(IModeService mode)
+    {
+        _mode = mode;
+        _mode.ModeChanged += (_, _) => TruncateIfTooLarge();
         TruncateIfTooLarge();
     }
 

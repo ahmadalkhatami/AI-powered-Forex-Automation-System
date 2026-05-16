@@ -167,12 +167,14 @@ public class TradePosition
     public void CloseManually(TradeStatus outcome, decimal exitPrice)
     {
         if (Status != TradeStatus.ACTIVE) return;
-        var pipValue = Direction == SignalDirection.BUY
+        var priceDelta = Direction == SignalDirection.BUY
             ? exitPrice - Entry
             : Entry - exitPrice;
-        FloatingPnlPips = (int)(pipValue * 10000);
-        FloatingPnl = Math.Round(pipValue * LotSize * 100000 * 0.0001m, 2);
-        Status = outcome;
+        // P&L USD = price delta × lot × contract size (100k untuk EURUSD).
+        // Pip count = price delta × 10000 (1 pip = 0.0001 untuk EURUSD).
+        FloatingPnlPips = (int)Math.Round(priceDelta * 10000m);
+        FloatingPnl     = Math.Round(priceDelta * LotSize * 100000m, 2);
+        Status   = outcome;
         ClosedAt = DateTimeOffset.UtcNow;
     }
 
@@ -203,10 +205,14 @@ public class TradePosition
     /// Tandai posisi sebagai ditutup oleh broker DENGAN nilai realized profit yang akurat.
     /// Dipanggil oleh EA setelah read HistoryDealGetDouble(DEAL_PROFIT) — mencakup
     /// commission + swap + actual fill price (bukan estimasi dari tick terakhir).
+    ///
+    /// Bisa dipanggil walaupun status sudah CLOSED — EA report adalah source of truth
+    /// untuk realized P&L (race: close-market endpoint mark CLOSED dulu pakai estimasi,
+    /// EA kirim actual profit setelah broker confirm). Update floating PnL + outcome
+    /// menggunakan nilai realized agar dashboard akurat.
     /// </summary>
     public void ClosedByBrokerWithProfit(decimal netProfit, decimal exitPrice, DateTimeOffset closedAt)
     {
-        if (Status != TradeStatus.ACTIVE) return;
         FloatingPnl     = Math.Round(netProfit, 2);
         var pipValue = Direction == SignalDirection.BUY
             ? exitPrice - Entry

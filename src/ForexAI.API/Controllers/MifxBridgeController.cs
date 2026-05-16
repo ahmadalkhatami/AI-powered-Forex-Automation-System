@@ -42,7 +42,9 @@ public record MifxTickRequest(
     decimal? Support    = null,
     decimal? Resistance = null,
     // ── Posisi open EA (EA v1.18+) ────────────────────────────────────
-    List<MifxPositionDto>? Positions  = null
+    List<MifxPositionDto>? Positions  = null,
+    // Mode account MT5 (EA v1.22+): "REAL" | "DEMO" | "CONTEST"
+    string?  AccountMode = null
 );
 
 public record MifxStatusRequest(
@@ -91,6 +93,7 @@ public class MifxBridgeController : ControllerBase
     private readonly MifxPositionSyncService  _syncService;
     private readonly ITradePositionRepository _positionRepo;
     private readonly ISystemStateService      _systemState;
+    private readonly IModeService             _modeService;
     private readonly IHubContext<DashboardHub> _hub;
     private readonly IMediator                _mediator;
     private readonly ILogger<MifxBridgeController> _logger;
@@ -102,6 +105,7 @@ public class MifxBridgeController : ControllerBase
         MifxPositionSyncService syncService,
         ITradePositionRepository positionRepo,
         ISystemStateService systemState,
+        IModeService modeService,
         IHubContext<DashboardHub> hub,
         IMediator mediator,
         ILogger<MifxBridgeController> logger)
@@ -112,6 +116,7 @@ public class MifxBridgeController : ControllerBase
         _syncService  = syncService;
         _positionRepo = positionRepo;
         _systemState  = systemState;
+        _modeService  = modeService;
         _hub          = hub;
         _mediator     = mediator;
         _logger       = logger;
@@ -122,6 +127,10 @@ public class MifxBridgeController : ControllerBase
     [HttpPost("tick")]
     public async Task<IActionResult> ReceiveTick([FromBody] MifxTickRequest req)
     {
+        // EA v1.22+ kirim accountMode → backend auto-detect demo/real, switch storage path.
+        if (!string.IsNullOrEmpty(req.AccountMode))
+            _modeService.ReportFromEa(req.AccountMode);
+
         var tick = new MifxTick(
             Pair:           req.Pair,
             Bid:            req.Bid,
@@ -138,7 +147,8 @@ public class MifxBridgeController : ControllerBase
             ATR14:          req.Atr14,
             ADX14:          req.Adx14,
             Support:        req.Support,
-            Resistance:     req.Resistance);
+            Resistance:     req.Resistance,
+            AccountMode:    req.AccountMode);
 
         // Konversi DTO posisi ke domain value object (null = EA lama, tidak mengirim posisi)
         IReadOnlyList<MifxBrokerPosition>? brokerPositions = req.Positions?
@@ -180,15 +190,17 @@ public class MifxBridgeController : ControllerBase
     public async Task<IActionResult> ReportClosedPosition([FromBody] MifxClosedPositionRequest req)
     {
         var externalId = $"MIFX-{req.Ticket}";
-        var openPositions = await _positionRepo.GetOpenPositionsAsync();
-        var position = openPositions.FirstOrDefault(p =>
+        // Cari di SEMUA posisi (bukan hanya ACTIVE) — close-market endpoint kadang mark CLOSED
+        // duluan pakai estimasi, lalu EA kirim actual realized profit untuk update nilai.
+        var all = await _positionRepo.GetAllAsync();
+        var position = all.FirstOrDefault(p =>
             string.Equals(p.ExternalTradeId, externalId, StringComparison.OrdinalIgnoreCase));
 
         if (position is null)
         {
             _logger.LogInformation(
-                "Closed-position report untuk ticket {Ticket} di-skip — posisi tidak ditemukan di state ACTIVE " +
-                "(mungkin sudah ditutup manual dari dashboard atau MagicNumber mismatch)",
+                "Closed-position report untuk ticket {Ticket} di-skip — posisi tidak ditemukan di repo " +
+                "(mungkin MagicNumber mismatch atau ditutup di MIFX tanpa pernah masuk ke ForexAI)",
                 req.Ticket);
             return Ok(new { skipped = true });
         }

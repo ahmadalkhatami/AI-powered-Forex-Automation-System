@@ -13,15 +13,18 @@ public class GetAccountHealthHandler : IRequestHandler<GetAccountHealthQuery, Ac
     private readonly ITradePositionRepository _positions;
     private readonly IBrokerService           _broker;
     private readonly ISystemStateService      _systemState;
+    private readonly IModeService             _mode;
 
     public GetAccountHealthHandler(
         ITradePositionRepository positions,
         IBrokerService broker,
-        ISystemStateService systemState)
+        ISystemStateService systemState,
+        IModeService mode)
     {
         _positions   = positions;
         _broker      = broker;
         _systemState = systemState;
+        _mode        = mode;
     }
 
     public async Task<AccountHealthResult> Handle(GetAccountHealthQuery _, CancellationToken ct)
@@ -92,8 +95,8 @@ public class GetAccountHealthHandler : IRequestHandler<GetAccountHealthQuery, Ac
             else break;
         }
 
-        // ── Tier-based risk + daily cap snapshot (Sprint 1 item 1) ──────────
-        var tier        = RiskTier.FromEquity(equity);
+        // ── Tier-based risk + daily cap snapshot (mode-aware) ────────────────
+        var tier        = RiskTier.FromEquity(equity, _mode.CurrentMode);
         var dailyUsage  = await _positions.GetDailyRiskUsageAsync(DateTimeOffset.UtcNow);
         var dailyCapUsd = equity * tier.DailyCapPct;
         var utilization = dailyCapUsd > 0m ? dailyUsage.UsedUsd / dailyCapUsd : 0m;
@@ -122,7 +125,11 @@ public class GetAccountHealthHandler : IRequestHandler<GetAccountHealthQuery, Ac
             MaxConsecutiveLosses: _systemState.MaxConsecutiveLosses,
             IsHalted:             _systemState.IsHalted,
             HaltReason:           _systemState.HaltReason,
-            MaxSpreadPips:        _systemState.MaxSpreadPips
+            MaxSpreadPips:        _systemState.MaxSpreadPips,
+
+            Mode:             _mode.CurrentMode.ToString().ToUpperInvariant(),
+            IsNanoMode:       tier.Name == "nano",
+            EffectiveRiskPct: tier.RiskPerTradePct
         );
     }
 }

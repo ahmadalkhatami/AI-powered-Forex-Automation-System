@@ -19,6 +19,7 @@ public class MifxPositionSyncService
     private readonly ITradePositionRepository _repo;
     private readonly ISystemStateService _systemState;
     private readonly IBrokerService _broker;
+    private readonly IModeService _mode;
     private readonly ILogger<MifxPositionSyncService> _logger;
 
     // Track peak R-multiple per posisi untuk breakeven + trailing logic.
@@ -32,22 +33,35 @@ public class MifxPositionSyncService
     //  kita bisa fire lagi tanpa guard ini → broker error / lot mismatch).
     private readonly HashSet<string> _closingInProgress = new();
 
-    // Trigger thresholds (di future bisa dipindah ke config). Standar industri:
-    //   +1R → breakeven mode active (tutup kalau price reverse ke entry)
-    //   +1.5R → trailing mode (tutup kalau price retrace 1R dari peak)
-    private const decimal BreakevenTriggerR = 1.0m;
-    private const decimal TrailingTriggerR  = 1.5m;
-    private const decimal TrailingGiveBackR = 1.0m;
+    // Tier-aware threshold: nano mode (modal kecil) lebih agresif lock profit.
+    // Standard: BE @ +1R, trail @ +1.5R retrace 1R, time stop 360min (6h)
+    // Nano:     BE @ +0.5R, trail @ +1R retrace 0.5R, time stop 120min (2h) — protect tiny modal
+    private (decimal beTrigger, decimal trailTrigger, decimal trailGiveBack, int timeStopMin) GetThresholds()
+    {
+        // Best-effort: kalau gak bisa hitung tier, fallback ke default standard.
+        try
+        {
+            var account = _broker.GetAccountAsync().GetAwaiter().GetResult();
+            decimal equity = account.Balance > 0 ? account.Balance : account.Equity;
+            var tier = RiskTier.FromEquity(equity, _mode.CurrentMode);
+            if (tier.Name == "nano")
+                return (0.5m, 1.0m, 0.5m, 120);
+        }
+        catch { /* fallback */ }
+        return (1.0m, 1.5m, 1.0m, _systemState.MaxHoldingMinutes);
+    }
 
     public MifxPositionSyncService(
         ITradePositionRepository repo,
         ISystemStateService systemState,
         IBrokerService broker,
+        IModeService mode,
         ILogger<MifxPositionSyncService> logger)
     {
         _repo        = repo;
         _systemState = systemState;
         _broker      = broker;
+        _mode        = mode;
         _logger      = logger;
     }
 
@@ -62,6 +76,9 @@ public class MifxPositionSyncService
 
         var localOpen = await _repo.GetOpenPositionsAsync();
         if (localOpen.Count == 0) return;
+
+        // Tier-aware thresholds untuk BE/trail/time-stop (nano mode lebih protektif)
+        var (beTrigger, trailTrigger, trailGiveBack, timeStopMin) = GetThresholds();
 
         var toUpdate = new List<Domain.Entities.TradePosition>();
 
@@ -96,17 +113,17 @@ public class MifxPositionSyncService
                         : Math.Max(currentR, 0m);
                     _peakR[local.TradeId] = peakR;
 
-                    // Trailing trigger — setelah +1.5R, close kalau retrace ≥ 1R dari peak
-                    if (peakR >= TrailingTriggerR && currentR <= peakR - TrailingGiveBackR)
+                    // Trailing trigger — setelah peak ≥ trailTrigger, close kalau retrace ≥ trailGiveBack
+                    if (peakR >= trailTrigger && currentR <= peakR - trailGiveBack)
                     {
                         _logger.LogWarning(
                             "Trailing stop fire: {Id} peakR={Peak:F2} currentR={Cur:F2} (give back ≥{Give:F1}R) — close",
-                            local.TradeId, peakR, currentR, TrailingGiveBackR);
+                            local.TradeId, peakR, currentR, trailGiveBack);
                         _closingInProgress.Add(local.TradeId);
                         _ = _broker.ClosePositionAsync(local);
                     }
-                    // Breakeven trigger — setelah +1R, close kalau price reverse ke entry atau lebih buruk
-                    else if (peakR >= BreakevenTriggerR && currentR <= 0m)
+                    // Breakeven trigger — setelah peak ≥ beTrigger, close kalau price reverse ke entry atau lebih buruk
+                    else if (peakR >= beTrigger && currentR <= 0m)
                     {
                         _logger.LogWarning(
                             "Breakeven fire: {Id} peakR={Peak:F2} currentR={Cur:F2} — price reverse ke entry, close",
@@ -116,15 +133,15 @@ public class MifxPositionSyncService
                     }
                 }
 
-                // Time stop — auto-close kalau posisi held > MaxHoldingMinutes
-                if (_systemState.MaxHoldingMinutes > 0 && local.OpenedAt.HasValue)
+                // Time stop — auto-close kalau posisi held > timeStopMin (tier-aware)
+                if (timeStopMin > 0 && local.OpenedAt.HasValue)
                 {
                     var ageMinutes = (DateTimeOffset.UtcNow - local.OpenedAt.Value).TotalMinutes;
-                    if (ageMinutes >= _systemState.MaxHoldingMinutes && !_closingInProgress.Contains(local.TradeId))
+                    if (ageMinutes >= timeStopMin && !_closingInProgress.Contains(local.TradeId))
                     {
                         _logger.LogWarning(
                             "Time stop fire: {Id} held {Age:F0} min ≥ {Max} min — close otomatis",
-                            local.TradeId, ageMinutes, _systemState.MaxHoldingMinutes);
+                            local.TradeId, ageMinutes, timeStopMin);
                         _closingInProgress.Add(local.TradeId);
                         // Fire-and-forget close — actual close akan di-detect di sync berikutnya
                         _ = _broker.ClosePositionAsync(local);

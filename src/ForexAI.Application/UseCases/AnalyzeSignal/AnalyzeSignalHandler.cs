@@ -43,14 +43,14 @@ public class AnalyzeSignalHandler : IRequestHandler<AnalyzeSignalCommand, TradeS
 
         if (isDuplicate)
         {
-            _logger.LogInformation("Skipping duplicate signal save (same as last within 60s): {Signal} conf={Confidence:P0}",
-                signal.Signal, signal.ConfidenceScore);
-        }
-        else
-        {
-            await _signals.SaveAsync(signal);
+            // Return last signal (existing ID) supaya downstream evaluate-risk bisa load dari repo.
+            // Sebelumnya kita return signal baru dengan ID fresh → repo tidak punya → 500 error.
+            _logger.LogInformation("Returning cached signal (duplicate within 60s): {Signal} conf={Confidence:P0} id={Id}",
+                last!.Signal, last.ConfidenceScore, last.Id);
+            return last;
         }
 
+        await _signals.SaveAsync(signal);
         _logger.LogInformation("Signal generated: {Signal} with confidence {Confidence:P0} for {Pair}",
             signal.Signal, signal.ConfidenceScore, signal.Pair);
 

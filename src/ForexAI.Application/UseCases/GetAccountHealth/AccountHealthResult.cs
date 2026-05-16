@@ -39,5 +39,13 @@ public record AccountHealthResult(
     /// <summary>Reason kenapa di-halt (untuk display banner)</summary>
     string? HaltReason           = null,
     /// <summary>Max spread (pips) yang diizinkan untuk execute order</summary>
-    decimal MaxSpreadPips        = 2.5m
+    decimal MaxSpreadPips        = 2.5m,
+
+    // ── Mode + nano-mode safeguard ──────────────────────────────────────────
+    /// <summary>"DEMO" = practice account, "REAL" = real money account (auto-detect dari EA)</summary>
+    string  Mode                 = "DEMO",
+    /// <summary>True kalau tier aktif = "nano" (REAL + modal &lt; $100)</summary>
+    bool    IsNanoMode           = false,
+    /// <summary>Effective risk % yang akan dipakai (mungkin = tier default, atau di-override per trade)</summary>
+    decimal EffectiveRiskPct     = 0m
 );

@@ -11,8 +11,8 @@
 //|  4. Drag EA ke chart EURUSD.m,M15                               |
 //+------------------------------------------------------------------+
 #property copyright "ForexAI"
-#property version   "1.21"
-#property description "ForexAI price bridge + indicators + candle stream + order executor + actual-close-profit sync"
+#property version   "1.22"
+#property description "ForexAI price bridge + indicators + candle stream + order executor + actual-close-profit sync + account mode detection"
 
 //--- Input parameters
 input string   BackendUrl   = "http://127.0.0.1:5033";  // URL backend ForexAI
@@ -140,6 +140,12 @@ void SendLatestTick()
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double equity  = AccountInfoDouble(ACCOUNT_EQUITY);
 
+   // Mode account: REAL / DEMO / CONTEST — backend pakai untuk pilih storage path
+   ENUM_ACCOUNT_TRADE_MODE tm = (ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE);
+   string accountMode = tm == ACCOUNT_TRADE_MODE_REAL ? "REAL"
+                      : tm == ACCOUNT_TRADE_MODE_DEMO ? "DEMO"
+                      :                                 "CONTEST";
+
    // ── Ambil nilai indikator dari handles ──────────────────────────
    double ma20m15_buf[1], ma50m15_buf[1];
    double ma20h1_buf[1],  ma50h1_buf[1];
@@ -189,11 +195,12 @@ void SendLatestTick()
       "\"rsi14\":%.2f,\"rsiDir\":%d,"
       "\"atr14\":%.5f,\"adx14\":%.2f,"
       "\"support\":%.5f,\"resistance\":%.5f,"
+      "\"accountMode\":\"%s\","
       "\"positions\":%s}",
       TradePair, bid, ask, time, balance, equity,
       ma20m15, ma50m15, ma20h1, ma50h1,
       rsi14, rsiDir, atr14, adx14, support, resistance,
-      positions);
+      accountMode, positions);
 
    string headers = "Content-Type: application/json\r\n";
    char   body[], resp[];

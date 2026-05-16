@@ -47,7 +47,9 @@ import type {
 
 const INITIAL_EQUITY = 1_000
 const PAIR = 'EURUSD'
-const TIMEFRAME = '1D'
+// Analyzer pakai indikator M15 (MA, RSI, ATR, ADX) + bias H1+D1 untuk trend confirmation.
+// Label "M15" yang dikirim ke backend cuma metadata — tidak mengubah perhitungan.
+const TIMEFRAME = 'M15'
 const CHART_CANDLE_COUNT = 200
 
 type PageState = 'loading' | 'no-signal' | 'signal-ready' | 'processing' | 'monitoring' | 'error' | 'ea-update-required'
@@ -172,6 +174,9 @@ export default function DashboardPage() {
   const [mifxStatus, setMifxStatus] = useState<MifxStatusResponse | null>(null)
   const [autoTrigger, setAutoTrigger] = useState(false)
   const [autoApprove, setAutoApprove] = useState(false)
+  // Risk override slider — Nano mode only. null = pakai tier default (5%).
+  const [nanoRiskOverride, setNanoRiskOverride] = useState<number | null>(null)
+  const lastModeRef = useRef<string | null>(null)
   const stream = useDashboardStream()
   const livePollInFlight = useRef(false)
   const lastBarTimeRef = useRef<number | null>(null)
@@ -212,6 +217,9 @@ export default function DashboardPage() {
         isHalted: health.isHalted,
         haltReason: health.haltReason,
         maxSpreadPips: health.maxSpreadPips,
+        mode: health.mode,
+        isNanoMode: health.isNanoMode,
+        effectiveRiskPct: health.effectiveRiskPct,
       })
     } catch {
       // keep previous value
@@ -321,6 +329,9 @@ export default function DashboardPage() {
         isHalted: h.isHalted,
         haltReason: h.haltReason,
         maxSpreadPips: h.maxSpreadPips,
+        mode: h.mode,
+        isNanoMode: h.isNanoMode,
+        effectiveRiskPct: h.effectiveRiskPct,
       })
     }
   }, [stream.accountHealth])
@@ -377,6 +388,26 @@ export default function DashboardPage() {
       Notification.requestPermission().catch(() => {})
     }
   }, [])
+
+  // Default OFF auto-trigger + auto-approve saat MASUK ke REAL mode (sekali per mode change).
+  // User harus manual approve di real money mode sampai confident.
+  useEffect(() => {
+    const currentMode = accountHealth.mode
+    if (!currentMode) return
+    if (lastModeRef.current === currentMode) return  // not a transition
+    lastModeRef.current = currentMode
+
+    if (currentMode === 'REAL') {
+      setAutoTrigger(false)
+      setAutoApprove(false)
+      localStorage.setItem('forexai.autoTrigger', 'false')
+      localStorage.setItem('forexai.autoApprove', 'false')
+      toast({
+        title: '🔴 REAL MODE detected',
+        description: 'Auto-trigger + auto-approve di-OFF default. Manual approve untuk safety.',
+      })
+    }
+  }, [accountHealth.mode, toast])
 
   const toggleAutoApprove = useCallback(() => {
     const next = !autoApprove
@@ -454,6 +485,10 @@ export default function DashboardPage() {
     try {
       // Mode MIFX_DEMO jika EA terkoneksi, SIMULATION jika tidak
       const tradeMode = mifxStatus?.connected ? 'MIFX_DEMO' : 'SIMULATION'
+      // Risk override hanya kirim kalau Nano mode + slider berbeda dari default
+      const overrideToSend = accountHealth.isNanoMode && nanoRiskOverride !== null
+        ? nanoRiskOverride
+        : undefined
       const position = await executeTrade({
         signalId: rawSignal.id,
         riskValidation: {
@@ -466,6 +501,7 @@ export default function DashboardPage() {
         peakEquity: accountHealth.peakEquity,
         currentEquity: accountHealth.equity,
         mode: tradeMode,
+        riskPctOverride: overrideToSend,
       })
       await Promise.all([refreshPositions(), refreshAccountHealth()])
       const isSkipped = position.status === 'SKIPPED'
@@ -486,7 +522,7 @@ export default function DashboardPage() {
       setPageState('signal-ready')
       toast({ title: 'Execute failed', description: 'Trade could not be executed', variant: 'destructive' })
     }
-  }, [rawSignal, riskValidation, mifxStatus, accountHealth, refreshPositions, refreshAccountHealth, toast])
+  }, [rawSignal, riskValidation, mifxStatus, accountHealth, nanoRiskOverride, refreshPositions, refreshAccountHealth, toast])
 
   // Auto-approve: confidence ≥ 70% (single gate, data-driven).
   // Backtest 200 candle M15 menunjukkan vetos (structure/RSI/overextension) sudah jadi
@@ -682,6 +718,24 @@ export default function DashboardPage() {
                 {regime} {adx14 !== null && adx14 > 0 ? `ADX ${adx14.toFixed(1)}` : ''}
               </span>
             )}
+            {/* Mode banner — auto-detect dari EA (DEMO/REAL). Wajib tampil untuk safety. */}
+            {accountHealth.mode && (
+              <span className={cn(
+                'px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border',
+                accountHealth.mode === 'REAL'
+                  ? 'bg-red-500/15 text-red-600 border-red-500/40 dark:text-red-400'
+                  : 'bg-emerald-500/15 text-emerald-600 border-emerald-500/40 dark:text-emerald-400'
+              )}
+              title={accountHealth.mode === 'REAL'
+                ? 'REAL MONEY — auto-detect dari MT5 account'
+                : 'DEMO account — practice mode'}>
+                {accountHealth.mode === 'REAL' ? '🔴 REAL' : '🟢 DEMO'}
+                {' · '}{(accountHealth.riskTier ?? 'starter').toUpperCase()}
+                {accountHealth.isNanoMode && (
+                  <span className="ml-1 text-[10px] opacity-90">⚠ {((accountHealth.effectiveRiskPct ?? 0.05) * 100).toFixed(1)}%/trade</span>
+                )}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {accountHealth.isHalted ? (
@@ -793,6 +847,32 @@ export default function DashboardPage() {
             'bg-background/95 backdrop-blur border-t p-4',
             'sm:relative sm:bottom-auto sm:bg-transparent sm:backdrop-blur-none sm:border-0 sm:p-0',
           )}>
+            {/* Nano risk slider — hanya tampil saat REAL + tier nano */}
+            {accountHealth.isNanoMode && riskValidation?.validatedParameters && (
+              <div className="mb-3 p-3 rounded-lg border border-red-500/40 bg-red-500/5 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-red-600 dark:text-red-400">⚠ NANO MODE — Risk Override</span>
+                  <span className="font-mono text-muted-foreground">
+                    {((nanoRiskOverride ?? accountHealth.effectiveRiskPct ?? 0.05) * 100).toFixed(1)}% ·
+                    ${(accountHealth.equity * (nanoRiskOverride ?? accountHealth.effectiveRiskPct ?? 0.05)).toFixed(2)}/trade
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={10}
+                  step={0.5}
+                  value={(nanoRiskOverride ?? accountHealth.effectiveRiskPct ?? 0.05) * 100}
+                  onChange={(e) => setNanoRiskOverride(parseFloat(e.target.value) / 100)}
+                  className="w-full accent-red-500"
+                />
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                  <span>1% (paling aman)</span>
+                  <span>5% (default Nano)</span>
+                  <span>10% (paling agresif)</span>
+                </div>
+              </div>
+            )}
             <ApproveRejectActions
               state={actionState}
               signal={heroData}

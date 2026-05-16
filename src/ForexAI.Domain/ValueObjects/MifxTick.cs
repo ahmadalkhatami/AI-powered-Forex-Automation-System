@@ -17,7 +17,9 @@ public record MifxTick(
     decimal? ATR14       = null,   // ATR(14) M15 dalam satuan harga (EA v1.16+)
     decimal? ADX14       = null,   // ADX(14) M15 trend strength 0-100 (EA v1.17+)
     decimal? Support     = null,
-    decimal? Resistance  = null
+    decimal? Resistance  = null,
+    // Mode account MT5 (EA v1.22+): "REAL" | "DEMO" | "CONTEST" | null (EA versi lama)
+    string?  AccountMode = null
 )
 {
     public decimal Mid    => Math.Round((Bid + Ask) / 2m, 5);

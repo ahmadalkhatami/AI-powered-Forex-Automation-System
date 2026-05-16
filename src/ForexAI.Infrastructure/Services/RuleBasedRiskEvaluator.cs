@@ -18,6 +18,13 @@ public class RuleBasedRiskEvaluator : IRiskEvaluator
     private const decimal HighConfidence = 0.60m;  // TEST: caution mulai 60%
     private const int     MaxOpenPositions = 3;
 
+    private readonly IModeService _mode;
+
+    public RuleBasedRiskEvaluator(IModeService mode)
+    {
+        _mode = mode;
+    }
+
     public Task<RiskValidation> EvaluateAsync(
         TradeSignal     signal,
         PredictorResult predictor,
@@ -25,7 +32,7 @@ public class RuleBasedRiskEvaluator : IRiskEvaluator
         int             openPositions,
         DailyRiskUsage  dailyUsage)
     {
-        var tier = RiskTier.FromEquity(equity);
+        var tier = RiskTier.FromEquity(equity, _mode.CurrentMode);
         var noGoReasons  = new List<string>();
         var cautionNotes = new List<string>();
 

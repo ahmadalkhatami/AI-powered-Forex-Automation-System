@@ -15,11 +15,13 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
 {
     private readonly IBrokerService _broker;
     private readonly ISystemStateService _systemState;
+    private readonly IModeService _mode;
 
-    public LiveSignalAnalyzer(IBrokerService broker, ISystemStateService systemState)
+    public LiveSignalAnalyzer(IBrokerService broker, ISystemStateService systemState, IModeService mode)
     {
         _broker      = broker;
         _systemState = systemState;
+        _mode        = mode;
     }
 
     public async Task<TradeSignal> AnalyzeAsync(MarketSnapshot snap)
@@ -32,6 +34,8 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             if (account.Balance > 0) equity = account.Balance;
         }
         catch { /* gunakan fallback */ }
+
+        var tier = RiskTier.FromEquity(equity, _mode.CurrentMode);
 
         // ── 1. Trend ────────────────────────────────────────────────────────
         var (trend, bullishBias) = AnalyzeTrend(snap);
@@ -63,8 +67,45 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         // ── 5. Scores ───────────────────────────────────────────────────────
         var (confluenceScore, confidenceScore) = CalculateScores(trend, momentum, structure, signal, snap.Regime);
 
-        // ── 6. Trade parameters (1% risk rule) ─────────────────────────────
-        var parameters = CalculateParameters(snap, signal, equity);
+        // ── 4e. Nano-mode extra vetos — STRICT quality threshold untuk modal kecil ─
+        // Modal real <$100 = 5% per trade unavoidable (broker min lot). Untuk kompensasi,
+        // butuh setup yang JAUH lebih bagus: confluence ≥ 80, conf ≥ 0.75, HTF full align,
+        // regime Trending only, ATR < 25p (SL tidak terlalu lebar).
+        if (signal != SignalDirection.HOLD && tier.Name == "nano")
+        {
+            decimal atrPips = snap.ATR14 > 0 ? snap.ATR14 / 0.0001m : 0m;
+            bool d1Available = snap.MA20_D1 > 0m && snap.MA50_D1 > 0m;
+            bool htfFullAligned = trend.HtfAligned && (!d1Available || (bullishBias >= 0.5m) == (snap.MA20_D1 > snap.MA50_D1));
+
+            if (confluenceScore < 80)
+            {
+                vetoReasons.Add($"VETO Nano: confluence {confluenceScore} < 80 — modal kecil butuh setup A+.");
+                signal = SignalDirection.HOLD;
+            }
+            else if (confidenceScore < 0.75m)
+            {
+                vetoReasons.Add($"VETO Nano: confidence {confidenceScore:P0} < 75% — modal kecil butuh kepastian tinggi.");
+                signal = SignalDirection.HOLD;
+            }
+            else if (!htfFullAligned)
+            {
+                vetoReasons.Add("VETO Nano: HTF (M15+H1+D1) tidak sejajar — butuh full alignment di nano mode.");
+                signal = SignalDirection.HOLD;
+            }
+            else if (snap.Regime != "Trending")
+            {
+                vetoReasons.Add($"VETO Nano: regime {snap.Regime} — nano mode hanya trade saat Trending.");
+                signal = SignalDirection.HOLD;
+            }
+            else if (atrPips > 25m)
+            {
+                vetoReasons.Add($"VETO Nano: ATR {atrPips:F1}p > 25 — SL terlalu lebar untuk modal kecil.");
+                signal = SignalDirection.HOLD;
+            }
+        }
+
+        // ── 6. Trade parameters (mode + tier-aware risk) ──────────────────
+        var parameters = CalculateParameters(snap, signal, equity, _mode.CurrentMode);
 
         // ── 7. Warnings ─────────────────────────────────────────────────────
         var warnings = BuildWarnings(snap, signal, confidenceScore, trend, momentum);
@@ -333,6 +374,25 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             }
         }
 
+        // VETO 6 — HTF D1 conflict (macro trend bias melawan signal)
+        // D1 adalah timeframe paling kuat — trade lawan D1 = swimming upstream.
+        // Skip kalau D1 data tidak tersedia (< 50 D1 candles cached).
+        // Lessons learned dari trade SELL @ 1.16227 (D1 bullish, M15+H1 bearish) → reversal saat reach support.
+        if (snap.MA20_D1 > 0m && snap.MA50_D1 > 0m)
+        {
+            bool d1Bullish = snap.MA20_D1 > snap.MA50_D1;
+            if (signal == SignalDirection.SELL && d1Bullish)
+            {
+                reasons.Add($"VETO: SELL di-override ke HOLD — D1 trend BULLISH (MA20 {snap.MA20_D1:F5} > MA50 {snap.MA50_D1:F5}), counter-D1 risiko tinggi.");
+                return (SignalDirection.HOLD, reasons);
+            }
+            if (signal == SignalDirection.BUY && !d1Bullish)
+            {
+                reasons.Add($"VETO: BUY di-override ke HOLD — D1 trend BEARISH (MA20 {snap.MA20_D1:F5} < MA50 {snap.MA50_D1:F5}), counter-D1 risiko tinggi.");
+                return (SignalDirection.HOLD, reasons);
+            }
+        }
+
         return (signal, reasons);
     }
 
@@ -386,27 +446,50 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
     // Contoh ATR 12 pip:  SL = 1.5 × 12 = 18 pip,  TP = 2.5 × 12 = 30 pip
     // Contoh ATR 20 pip:  SL = 1.5 × 20 = 30 pip,  TP = 2.5 × 20 = 50 pip
     private static TradeParameters CalculateParameters(
-        MarketSnapshot snap, SignalDirection signal, decimal equity)
+        MarketSnapshot snap, SignalDirection signal, decimal equity, TradeMode mode)
     {
-        var tier           = RiskTier.FromEquity(equity);
+        var tier           = RiskTier.FromEquity(equity, mode);
         decimal riskAmount = Math.Round(equity * tier.RiskPerTradePct, 2);
         decimal entry      = snap.CurrentPrice;
         const decimal pipSize = 0.0001m;  // EURUSD: 1 pip = 0.0001
 
         // ── ATR-based SL/TP ──────────────────────────────────────────────────
-        const decimal kSL = 1.5m;   // SL multiplier
-        const decimal kTP = 2.5m;   // TP multiplier  →  R:R = kTP/kSL = 1.67
+        // Nano mode: kTP turun 2.5 → 2.0 (R:R 1.33) — hit rate naik untuk modal kecil.
+        const decimal kSL = 1.5m;
+        decimal kTP = tier.Name == "nano" ? 2.0m : 2.5m;
 
         // Fallback 15 pip jika ATR belum ada (simulasi / EA v1.15 lama)
         decimal atrPips = snap.ATR14 > 0
             ? Math.Round(snap.ATR14 / pipSize, 1)
             : 15m;
 
-        // Minimum SL = 15 pips → broker MIFX/MT5 retail biasanya butuh stop level ≥ 10-15 pips
-        // (TRADE_RETCODE_INVALID_STOPS=10016 muncul jika SL terlalu dekat dengan harga).
-        // Minimum TP = SL × 1.5 agar R:R minimal 1.5 dan TP juga lolos broker stop level.
+        // Minimum SL = 15 pips, Minimum TP = max(SL+5, SL × 1.5)
         int slPips = (int)Math.Clamp(Math.Round(kSL * atrPips), 15m, 80m);
-        int tpPips = (int)Math.Clamp(Math.Round(kTP * atrPips), Math.Max(slPips + 5m, slPips * 1.5m), 120m);
+        int tpPipsBase = (int)Math.Clamp(Math.Round(kTP * atrPips), Math.Max(slPips + 5m, slPips * 1.5m), 120m);
+
+        // ── Smart TP cap: jangan menembus S/R level berikutnya ────────────────
+        // Untuk SELL: TP tidak boleh turun lebih jauh dari support − buffer (3 pip Nano, 5 pip lainnya)
+        // Untuk BUY:  TP tidak boleh naik lebih jauh dari resistance + buffer
+        // Ini meningkatkan hit rate karena price statistik bouncing di S/R, bukan breakout.
+        decimal buffer = tier.Name == "nano" ? 3m * pipSize : 5m * pipSize;
+        int tpPips = tpPipsBase;
+        if (decimal.TryParse(snap.SupportZone,    System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var support) &&
+            decimal.TryParse(snap.ResistanceZone, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var resistance))
+        {
+            if (signal == SignalDirection.SELL && support > 0m && support < entry)
+            {
+                // Cap TP supaya tidak menembus support; minimal 5 pips di atas support buffer
+                decimal tpCapPrice = support + buffer;  // close just above support
+                int tpCapPips = (int)Math.Round((entry - tpCapPrice) / pipSize);
+                if (tpCapPips >= slPips + 5 && tpCapPips < tpPips) tpPips = tpCapPips;
+            }
+            else if (signal == SignalDirection.BUY && resistance > 0m && resistance > entry)
+            {
+                decimal tpCapPrice = resistance - buffer;
+                int tpCapPips = (int)Math.Round((tpCapPrice - entry) / pipSize);
+                if (tpCapPips >= slPips + 5 && tpCapPips < tpPips) tpPips = tpCapPips;
+            }
+        }
 
         decimal stopLoss, takeProfit;
         if (signal == SignalDirection.BUY)

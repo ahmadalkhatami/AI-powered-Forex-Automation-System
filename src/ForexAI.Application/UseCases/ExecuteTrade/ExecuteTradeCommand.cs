@@ -9,5 +9,6 @@ public record ExecuteTradeCommand(
     RiskValidation RiskValidation,
     decimal PeakEquity,
     decimal CurrentEquity,
-    string Mode = "SIMULATION"
+    string Mode = "SIMULATION",
+    decimal? RiskPctOverride = null
 ) : IRequest<TradePosition>;

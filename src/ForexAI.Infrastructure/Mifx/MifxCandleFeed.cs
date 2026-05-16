@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ForexAI.Domain.Interfaces;
 using ForexAI.Domain.ValueObjects;
 
 namespace ForexAI.Infrastructure.Mifx;
@@ -15,13 +16,27 @@ public class MifxCandleFeed
     private readonly Dictionary<string, IReadOnlyList<CandleBar>> _cache = new();
     private readonly Dictionary<string, DateTimeOffset> _receivedAt = new();
     private readonly object _lock = new();
-    private readonly string _persistPath;
+    private readonly IModeService _mode;
 
-    public MifxCandleFeed()
+    private string PersistPath
     {
-        // Resolve ke repo root agar konsisten apapun CWD-nya (dotnet run / IDE / test)
-        Directory.CreateDirectory(ProjectPaths.ImplementationArtifactsDir);
-        _persistPath = Path.Combine(ProjectPaths.ImplementationArtifactsDir, "mifx-candle-cache.json");
+        get
+        {
+            var dir = ProjectPaths.GetImplementationArtifactsDir(_mode.CurrentMode);
+            Directory.CreateDirectory(dir);
+            return Path.Combine(dir, "mifx-candle-cache.json");
+        }
+    }
+
+    public MifxCandleFeed(IModeService mode)
+    {
+        _mode = mode;
+        _mode.ModeChanged += (_, _) =>
+        {
+            // Cache di-clear saat mode change — load ulang dari path mode baru.
+            lock (_lock) { _cache.Clear(); _receivedAt.Clear(); }
+            Load();
+        };
         Load();
     }
 
@@ -87,7 +102,7 @@ public class MifxCandleFeed
                 _cache.ToDictionary(kv => kv.Key, kv => kv.Value.ToList()),
                 new Dictionary<string, DateTimeOffset>(_receivedAt));
             var json = JsonSerializer.Serialize(snapshot);
-            File.WriteAllText(_persistPath, json);
+            File.WriteAllText(PersistPath, json);
         }
         catch
         {
@@ -97,10 +112,10 @@ public class MifxCandleFeed
 
     private void Load()
     {
-        if (!File.Exists(_persistPath)) return;
+        if (!File.Exists(PersistPath)) return;
         try
         {
-            var json = File.ReadAllText(_persistPath);
+            var json = File.ReadAllText(PersistPath);
             var snapshot = JsonSerializer.Deserialize<PersistedCache>(json);
             if (snapshot is null) return;
             lock (_lock)

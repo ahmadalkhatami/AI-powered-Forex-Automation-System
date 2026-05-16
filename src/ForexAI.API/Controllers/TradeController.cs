@@ -31,7 +31,8 @@ public class TradeController : ControllerBase
                 request.RiskValidation,
                 request.PeakEquity,
                 request.CurrentEquity,
-                request.Mode), ct);
+                request.Mode,
+                request.RiskPctOverride), ct);
 
         _audit.Log("execute",
             $"{result.Status} {result.Pair} {result.Direction} lot={result.LotSize} mode={result.Mode}" +

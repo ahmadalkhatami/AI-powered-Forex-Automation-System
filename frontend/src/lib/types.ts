@@ -1,3 +1,6 @@
+export type AccountTier = 'nano' | 'starter' | 'growth' | 'stable' | 'scaled'
+export type AccountMode = 'DEMO' | 'REAL'
+
 export interface AccountHealthData {
   equity: number
   peakEquity: number
@@ -8,11 +11,11 @@ export interface AccountHealthData {
   winRate?: number        // 0.0–1.0
   source?: 'LIVE' | 'SIMULATION'   // LIVE = dari akun broker nyata
 
-  // Tier-based risk + daily cap (Sprint 1 item 1)
-  riskTier?: 'starter' | 'growth' | 'stable' | 'scaled'
+  // Tier-based risk + daily cap
+  riskTier?: AccountTier
   riskPerTradePct?: number       // 0.020 = 2%
   dailyCapPct?: number           // 0.060 = 6%
-  maxDailyTrades?: number        // 3 / 4 / 5
+  maxDailyTrades?: number        // 3 / 4 / 5 / 7
   dailyRiskUsedUsd?: number      // total $ risk dipakai hari ini
   tradesOpenedToday?: number     // jumlah trade dibuka hari ini
   dailyCapUtilization?: number   // 0.0–1.0+ — >1 = cap terlewat
@@ -23,6 +26,11 @@ export interface AccountHealthData {
   isHalted?: boolean
   haltReason?: string | null
   maxSpreadPips?: number
+
+  // Mode (auto-detect dari EA) + Nano warning
+  mode?: AccountMode
+  isNanoMode?: boolean
+  effectiveRiskPct?: number
 }
 
 export interface CandleBar {
@@ -59,7 +67,7 @@ export interface AccountHealthResponse {
   source: 'LIVE' | 'SIMULATION'
 
   // Tier-based risk + daily cap
-  riskTier: 'starter' | 'growth' | 'stable' | 'scaled'
+  riskTier: AccountTier
   riskPerTradePct: number
   dailyCapPct: number
   maxDailyTrades: number
@@ -73,6 +81,11 @@ export interface AccountHealthResponse {
   isHalted: boolean
   haltReason: string | null
   maxSpreadPips: number
+
+  // Mode (auto-detect dari EA) + Nano warning
+  mode: AccountMode
+  isNanoMode: boolean
+  effectiveRiskPct: number
 }
 
 export interface AuditEvent {
@@ -355,4 +368,5 @@ export interface ExecuteTradeRequest {
   peakEquity: number
   currentEquity: number
   mode: string
+  riskPctOverride?: number  // 0.01-0.10 — hanya berlaku di Nano tier
 }

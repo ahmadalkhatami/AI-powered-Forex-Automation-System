@@ -9,7 +9,7 @@ namespace ForexAI.Infrastructure.Persistence.Repositories;
 
 public class JsonTradePositionRepository : ITradePositionRepository
 {
-    private readonly string _filePath;
+    private readonly Func<string> _filePathResolver;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -18,18 +18,20 @@ public class JsonTradePositionRepository : ITradePositionRepository
         Converters = { new JsonStringEnumConverter() }
     };
 
-    public JsonTradePositionRepository()
+    // Mode-aware: path otomatis ikut mode terbaru (Demo/Real punya storage dir terpisah).
+    public JsonTradePositionRepository(IModeService mode)
     {
-        _filePath = ResolveDefaultPath();
+        _filePathResolver = () =>
+            Path.Combine(ProjectPaths.GetImplementationArtifactsDir(mode.CurrentMode), "execution-log.json");
     }
 
+    // Constructor explicit untuk testing
     public JsonTradePositionRepository(string filePath)
     {
-        _filePath = filePath;
+        _filePathResolver = () => filePath;
     }
 
-    private static string ResolveDefaultPath() =>
-        Path.Combine(ProjectPaths.ImplementationArtifactsDir, "execution-log.json");
+    private string _filePath => _filePathResolver();
 
     private async Task<List<TradePositionDto>> LoadAllAsync()
     {

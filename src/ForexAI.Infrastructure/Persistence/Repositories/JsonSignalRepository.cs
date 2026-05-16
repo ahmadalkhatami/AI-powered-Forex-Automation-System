@@ -8,7 +8,7 @@ namespace ForexAI.Infrastructure.Persistence.Repositories;
 
 public class JsonSignalRepository : ISignalRepository
 {
-    private readonly string _filePath;
+    private readonly Func<string> _filePathResolver;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -19,18 +19,20 @@ public class JsonSignalRepository : ISignalRepository
 
     private static readonly SemaphoreSlim _writeLock = new(1, 1);
 
-    public JsonSignalRepository()
+    // Mode-aware: path dibaca lazy per operation supaya otomatis ikut mode terbaru.
+    public JsonSignalRepository(IModeService mode)
     {
-        _filePath = ResolveDefaultPath();
+        _filePathResolver = () =>
+            Path.Combine(ProjectPaths.GetImplementationArtifactsDir(mode.CurrentMode), "signal-history.json");
     }
 
+    // Constructor explicit untuk testing
     public JsonSignalRepository(string filePath)
     {
-        _filePath = filePath;
+        _filePathResolver = () => filePath;
     }
 
-    private static string ResolveDefaultPath() =>
-        Path.Combine(ProjectPaths.ImplementationArtifactsDir, "signal-history.json");
+    private string _filePath => _filePathResolver();
 
     private async Task<List<TradeSignalDto>> LoadAllAsync()
     {

@@ -11,14 +11,12 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
 {
     private const int MaxOpenPositions = 3;
     private const decimal MaxDrawdownPct = 0.10m;
-    // 1% target + 5 basis-point tolerance untuk floating point dan
-    // equity drift kecil antara saat risk evaluation dan saat execute.
-    private const decimal MaxRiskPerTradePct = 0.0105m;
 
     private readonly ISignalRepository _signals;
     private readonly ITradePositionRepository _positions;
     private readonly IBrokerService _broker;
     private readonly ISystemStateService _systemState;
+    private readonly IModeService _mode;
     private readonly ILogger<ExecuteTradeHandler> _logger;
 
     public ExecuteTradeHandler(
@@ -26,12 +24,14 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
         ITradePositionRepository positions,
         IBrokerService broker,
         ISystemStateService systemState,
+        IModeService mode,
         ILogger<ExecuteTradeHandler> logger)
     {
         _signals = signals;
         _positions = positions;
         _broker = broker;
         _systemState = systemState;
+        _mode = mode;
         _logger = logger;
     }
 
@@ -119,12 +119,43 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
             return skipped;
         }
 
-        // Hard limit: risk per trade max 1%
+        // Tier-aware: dapatkan tier dulu untuk hitung risk limit + handle Nano override
+        var tier = RiskTier.FromEquity(currentEquity, _mode.CurrentMode);
         var p = request.RiskValidation.ValidatedParameters!;
-        var actualRiskPct = currentEquity > 0 ? p.RiskAmount / currentEquity : p.RiskAmount;
-        if (actualRiskPct > MaxRiskPerTradePct)
+
+        // Per-trade risk override (slider Nano mode di dashboard)
+        // Pakai override kalau di dalam tier limit (1% sampai 10%) dan tier == nano (yang accept higher).
+        if (request.RiskPctOverride is decimal overridePct && overridePct > 0m)
         {
-            var msg = $"Risk {actualRiskPct:P2} exceeds 1% hard limit (equity drift check)";
+            if (tier.Name != "nano")
+            {
+                _logger.LogInformation("RiskPctOverride {Pct:P1} diabaikan — hanya berlaku di Nano tier (current: {Tier})", overridePct, tier.Name);
+            }
+            else if (overridePct < 0.01m || overridePct > 0.10m)
+            {
+                _logger.LogWarning("RiskPctOverride {Pct:P1} di luar range [1%, 10%] — pakai tier default {Default:P1}", overridePct, tier.RiskPerTradePct);
+            }
+            else
+            {
+                // Recalculate parameters dengan override risk %.
+                decimal newRiskAmount = Math.Round(currentEquity * overridePct, 2);
+                int slPips = p.StopLossPips;
+                decimal newLotSize = Math.Max(Math.Round(newRiskAmount / (slPips * 10m), 2), 0.01m);
+                decimal newPotentialProfit = Math.Round(newLotSize * p.TakeProfitPips * 10m, 2);
+
+                _logger.LogInformation("Nano override: risk {Old:P1} → {New:P1} (lot {OldLot} → {NewLot})",
+                    tier.RiskPerTradePct, overridePct, p.LotSize, newLotSize);
+
+                p = p with { RiskAmount = newRiskAmount, LotSize = newLotSize, PotentialProfit = newPotentialProfit };
+            }
+        }
+
+        // Hard limit risk per trade — tier-aware (nano: max 10%, lainnya: tier max + 5bp toleransi)
+        decimal maxRiskPct = tier.Name == "nano" ? 0.10m : (tier.RiskPerTradePct + 0.0005m);
+        var actualRiskPct = currentEquity > 0 ? p.RiskAmount / currentEquity : p.RiskAmount;
+        if (actualRiskPct > maxRiskPct)
+        {
+            var msg = $"Risk {actualRiskPct:P2} exceeds tier '{tier.Name}' max {maxRiskPct:P2}";
             _logger.LogWarning("Trade skipped: {Reason}", msg);
             var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
             await _positions.SaveAsync(skipped);

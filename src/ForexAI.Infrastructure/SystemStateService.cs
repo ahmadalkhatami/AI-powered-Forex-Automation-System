@@ -11,6 +11,8 @@ namespace ForexAI.Infrastructure;
 /// <para><b>Halt:</b> kill switch user-triggered — semua execute path harus check IsHalted dulu.</para>
 /// <para><b>MaxSpreadPips:</b> hard reject order kalau spread broker melebar terlalu lebar.</para>
 /// <para><b>MaxConsecutiveLosses:</b> threshold circuit breaker — di-handle di risk evaluator.</para>
+/// <para><b>Mode-aware:</b> file path otomatis pindah ikut mode (demo vs real). Saat mode berubah,
+/// state runtime ter-reload dari path baru.</para>
 /// </summary>
 public class SystemStateService : ISystemStateService
 {
@@ -27,13 +29,36 @@ public class SystemStateService : ISystemStateService
     public DateTimeOffset? LastLossAt { get; private set; }
     public int CooldownMinutes { get; private set; } = 30;
 
-    private readonly string _persistPath;
+    private readonly IModeService _mode;
     private readonly object _lock = new();
 
-    public SystemStateService()
+    private string PersistPath
     {
-        Directory.CreateDirectory(ProjectPaths.ImplementationArtifactsDir);
-        _persistPath = Path.Combine(ProjectPaths.ImplementationArtifactsDir, "system-state.json");
+        get
+        {
+            var dir = ProjectPaths.GetImplementationArtifactsDir(_mode.CurrentMode);
+            Directory.CreateDirectory(dir);
+            return Path.Combine(dir, "system-state.json");
+        }
+    }
+
+    public SystemStateService(IModeService mode)
+    {
+        _mode = mode;
+        _mode.ModeChanged += OnModeChanged;
+        Load();
+    }
+
+    private void OnModeChanged(object? sender, ModeChangedEventArgs e)
+    {
+        // Reset state ke default + reload dari file mode baru.
+        // Cooldown post-loss tidak boleh terbawa antar mode (demo loss ≠ block real trade).
+        lock (_lock)
+        {
+            IsHalted = false; HaltReason = null; HaltedAt = null;
+            LastLossDirection = null; LastLossAt = null;
+            MaxSpreadPips = 2.5m; MaxConsecutiveLosses = 3; MaxHoldingMinutes = 360; CooldownMinutes = 30;
+        }
         Load();
     }
 
@@ -102,19 +127,21 @@ public class SystemStateService : ISystemStateService
                 MaxSpreadPips, MaxConsecutiveLosses, MaxHoldingMinutes,
                 LastLossDirection, LastLossAt, CooldownMinutes);
             var json = JsonSerializer.Serialize(snap, new JsonSerializerOptions { WriteIndented = true });
-            var tmp  = _persistPath + ".tmp";
+            var path = PersistPath;
+            var tmp  = path + ".tmp";
             File.WriteAllText(tmp, json);
-            File.Move(tmp, _persistPath, overwrite: true);
+            File.Move(tmp, path, overwrite: true);
         }
         catch { /* best effort */ }
     }
 
     private void Load()
     {
-        if (!File.Exists(_persistPath)) return;
+        var path = PersistPath;
+        if (!File.Exists(path)) return;
         try
         {
-            var snap = JsonSerializer.Deserialize<Snapshot>(File.ReadAllText(_persistPath));
+            var snap = JsonSerializer.Deserialize<Snapshot>(File.ReadAllText(path));
             if (snap is null) return;
             lock (_lock)
             {

@@ -164,6 +164,8 @@ export interface PositionCardData {
   pair: string
   direction: 'BUY' | 'SELL'
   entry: number
+  stopLoss?: number
+  takeProfit?: number
   currentPrice?: number
   floatingPnl: number       // in USD (from broker tick sync)
   floatingPnlPips: number

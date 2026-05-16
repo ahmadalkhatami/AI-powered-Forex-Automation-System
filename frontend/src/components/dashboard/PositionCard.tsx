@@ -91,10 +91,48 @@ export function PositionCard({ position, currentPrice, onCloseMarket }: Position
           </div>
         </div>
 
-        {/* Entry price */}
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Entry</span>
-          <span className="font-mono font-semibold">{position.entry.toFixed(5)}</span>
+        {/* Entry / SL / TP — dengan distance dari current price kalau ACTIVE */}
+        <div className="space-y-1 text-sm">
+          <div className="flex items-center justify-between">
+            <span className="text-muted-foreground">Entry</span>
+            <span className="font-mono font-semibold">{position.entry.toFixed(5)}</span>
+          </div>
+          {position.stopLoss && position.stopLoss > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-red-600 dark:text-red-400 text-xs">SL</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-mono text-xs text-red-600 dark:text-red-400">
+                  {position.stopLoss.toFixed(5)}
+                </span>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  ({Math.round(Math.abs(position.entry - position.stopLoss) * 10000)}p)
+                </span>
+                {position.status === 'ACTIVE' && currentPrice && (
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    · {Math.round(Math.abs(currentPrice - position.stopLoss) * 10000)}p away
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+          {position.takeProfit && position.takeProfit > 0 && (
+            <div className="flex items-center justify-between">
+              <span className="text-emerald-600 dark:text-emerald-400 text-xs">TP</span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-mono text-xs text-emerald-600 dark:text-emerald-400">
+                  {position.takeProfit.toFixed(5)}
+                </span>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  ({Math.round(Math.abs(position.entry - position.takeProfit) * 10000)}p)
+                </span>
+                {position.status === 'ACTIVE' && currentPrice && (
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    · {Math.round(Math.abs(currentPrice - position.takeProfit) * 10000)}p away
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Floating P&L (interpolated from live MIFX price kalau ACTIVE) */}

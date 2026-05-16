@@ -143,6 +143,8 @@ function mapToPositionCard(pos: TradePositionResponse): PositionCardData {
     pair: pos.pair,
     direction,
     entry: pos.entry,
+    stopLoss: pos.stopLoss,
+    takeProfit: pos.takeProfit,
     floatingPnl: pos.floatingPnl,
     floatingPnlPips: pos.floatingPnlPips,
     lotSize: pos.lotSize,

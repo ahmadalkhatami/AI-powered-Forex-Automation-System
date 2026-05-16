@@ -174,6 +174,7 @@ export default function DashboardPage() {
   const [positions, setPositions] = useState<TradePositionResponse[]>([])
   const [candles, setCandles] = useState<CandleBar[]>([])
   const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('M15')
+  const [chartWideMode, setChartWideMode] = useState(false)
   const [mifxStatus, setMifxStatus] = useState<MifxStatusResponse | null>(null)
   const [autoTrigger, setAutoTrigger] = useState(false)
   const [autoApprove, setAutoApprove] = useState(false)
@@ -396,7 +397,17 @@ export default function DashboardPage() {
     if (savedTrigger && 'Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission().catch(() => {})
     }
+    // Load chart wide-mode preference
+    setChartWideMode(localStorage.getItem('forexai.chartWideMode') === 'true')
   }, [])
+
+  const toggleChartWideMode = () => {
+    setChartWideMode((prev) => {
+      const next = !prev
+      localStorage.setItem('forexai.chartWideMode', String(next))
+      return next
+    })
+  }
 
   // Default OFF auto-trigger + auto-approve saat MASUK ke REAL mode (sekali per mode change).
   // User harus manual approve di real money mode sampai confident.
@@ -698,7 +709,10 @@ export default function DashboardPage() {
   const actionState = deriveActionState(pageState, riskValidation)
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-[65%_35%] gap-4">
+    <div className={cn(
+      'grid grid-cols-1 gap-4',
+      chartWideMode ? 'md:grid-cols-1' : 'md:grid-cols-[65%_35%]',
+    )}>
       <div className="space-y-4 pb-24 sm:pb-0">
         {/* Header with pair info + MIFX live ticker + trigger */}
         <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -848,6 +862,8 @@ export default function DashboardPage() {
           positions={positions}
           onTimeframeChange={setChartTimeframe}
           isMifxConnected={mifxStatus?.connected ?? false}
+          isWideMode={chartWideMode}
+          onToggleWideMode={toggleChartWideMode}
         />
 
         {/* EA update required banner */}
@@ -917,7 +933,11 @@ export default function DashboardPage() {
         <RiskGatePanel data={riskGateData} />
       </div>
 
-      <div className="space-y-4">
+      <div className={cn(
+        'space-y-4',
+        // Wide mode: account + positions side-by-side di bawah chart supaya tidak terlalu lebar
+        chartWideMode && 'md:grid md:grid-cols-2 md:gap-4 md:space-y-0',
+      )}>
         <AccountHealthBar
           data={accountHealth}
           positions={positions}

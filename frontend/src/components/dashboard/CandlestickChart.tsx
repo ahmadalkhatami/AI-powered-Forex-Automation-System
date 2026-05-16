@@ -19,7 +19,7 @@ import {
   type UTCTimestamp,
   type CandlestickData,
 } from 'lightweight-charts'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp, Maximize2, Minimize2 } from 'lucide-react'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { computeSMA, computeRSI } from '@/lib/indicators'
@@ -52,6 +52,8 @@ interface Props {
   positions?: TradePositionResponse[]
   onTimeframeChange?: (tf: ChartTimeframe) => void
   isMifxConnected?: boolean
+  isWideMode?: boolean
+  onToggleWideMode?: () => void
 }
 
 function snapToCandleTime(iso: string, candles: CandleBar[]): number | null {
@@ -85,6 +87,8 @@ export function CandlestickChart({
   positions = [],
   onTimeframeChange,
   isMifxConnected,
+  isWideMode = false,
+  onToggleWideMode,
 }: Props) {
   const mainContainerRef = useRef<HTMLDivElement>(null)
   const rsiContainerRef = useRef<HTMLDivElement>(null)
@@ -582,6 +586,15 @@ export function CandlestickChart({
             )}
           </div>
           <div className="flex items-center gap-3 text-xs">
+            {onToggleWideMode && !isCollapsed && (
+              <button
+                onClick={onToggleWideMode}
+                className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"
+                title={isWideMode ? 'Mode normal (chart + sidebar)' : 'Mode lebar (chart full-width, sidebar pindah bawah)'}
+              >
+                {isWideMode ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+              </button>
+            )}
             <button
               onClick={toggleCollapsed}
               className="p-1 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors"

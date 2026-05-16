@@ -31,6 +31,11 @@ export interface AccountHealthData {
   mode?: AccountMode
   isNanoMode?: boolean
   effectiveRiskPct?: number
+
+  // Hard $ caps (Nano full-auto safety)
+  nanoMaxDailyLossUsd?: number
+  nanoEquityFloorUsd?: number
+  todayRealizedPnlUsd?: number
 }
 
 export interface CandleBar {
@@ -86,6 +91,11 @@ export interface AccountHealthResponse {
   mode: AccountMode
   isNanoMode: boolean
   effectiveRiskPct: number
+
+  // Hard $ caps (Nano full-auto safety)
+  nanoMaxDailyLossUsd: number
+  nanoEquityFloorUsd: number
+  todayRealizedPnlUsd: number
 }
 
 export interface AuditEvent {

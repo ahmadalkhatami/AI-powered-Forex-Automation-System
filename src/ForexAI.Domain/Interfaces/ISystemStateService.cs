@@ -21,6 +21,11 @@ public interface ISystemStateService
     DateTimeOffset?  LastLossAt          { get; }
     int              CooldownMinutes     { get; }    // 0 = disabled
 
+    // Hard $ caps untuk full-auto safety di Nano mode (tiny modal).
+    // 0 = disabled (pakai % cap dari tier saja). Default Nano: -$5 daily, floor $20.
+    decimal          NanoMaxDailyLossUsd { get; }   // auto-halt kalau today's PnL <= -nilai ini
+    decimal          NanoEquityFloorUsd  { get; }   // auto-halt PERMANENT kalau equity <= nilai ini
+
     void Halt(string reason);
     void Resume();
     void RegisterLoss(SignalDirection direction);

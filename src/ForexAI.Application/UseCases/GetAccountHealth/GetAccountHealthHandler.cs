@@ -129,7 +129,13 @@ public class GetAccountHealthHandler : IRequestHandler<GetAccountHealthQuery, Ac
 
             Mode:             _mode.CurrentMode.ToString().ToUpperInvariant(),
             IsNanoMode:       tier.Name == "nano",
-            EffectiveRiskPct: tier.RiskPerTradePct
+            EffectiveRiskPct: tier.RiskPerTradePct,
+
+            NanoMaxDailyLossUsd: _systemState.NanoMaxDailyLossUsd,
+            NanoEquityFloorUsd:  _systemState.NanoEquityFloorUsd,
+            TodayRealizedPnlUsd: Math.Round(closed
+                .Where(p => p.ClosedAt.HasValue && p.ClosedAt.Value.UtcDateTime.Date == DateTimeOffset.UtcNow.Date)
+                .Sum(p => p.FloatingPnl), 2)
         );
     }
 }

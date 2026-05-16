@@ -47,5 +47,13 @@ public record AccountHealthResult(
     /// <summary>True kalau tier aktif = "nano" (REAL + modal &lt; $100)</summary>
     bool    IsNanoMode           = false,
     /// <summary>Effective risk % yang akan dipakai (mungkin = tier default, atau di-override per trade)</summary>
-    decimal EffectiveRiskPct     = 0m
+    decimal EffectiveRiskPct     = 0m,
+
+    // ── Hard $ caps (full-auto safety) ──────────────────────────────────────
+    /// <summary>Cap absolut $ loss per hari di Nano mode (auto-halt kalau hit)</summary>
+    decimal NanoMaxDailyLossUsd  = 0m,
+    /// <summary>Equity floor di Nano mode — drop ke level ini = permanent halt</summary>
+    decimal NanoEquityFloorUsd   = 0m,
+    /// <summary>Total $ loss hari ini (negatif kalau loss)</summary>
+    decimal TodayRealizedPnlUsd  = 0m
 );

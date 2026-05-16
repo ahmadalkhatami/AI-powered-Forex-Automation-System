@@ -223,6 +223,9 @@ export default function DashboardPage() {
         mode: health.mode,
         isNanoMode: health.isNanoMode,
         effectiveRiskPct: health.effectiveRiskPct,
+        nanoMaxDailyLossUsd: health.nanoMaxDailyLossUsd,
+        nanoEquityFloorUsd:  health.nanoEquityFloorUsd,
+        todayRealizedPnlUsd: health.todayRealizedPnlUsd,
       })
     } catch {
       // keep previous value
@@ -335,6 +338,9 @@ export default function DashboardPage() {
         mode: h.mode,
         isNanoMode: h.isNanoMode,
         effectiveRiskPct: h.effectiveRiskPct,
+        nanoMaxDailyLossUsd: h.nanoMaxDailyLossUsd,
+        nanoEquityFloorUsd:  h.nanoEquityFloorUsd,
+        todayRealizedPnlUsd: h.todayRealizedPnlUsd,
       })
     }
   }, [stream.accountHealth])
@@ -739,6 +745,27 @@ export default function DashboardPage() {
                 )}
               </span>
             )}
+            {/* Nano $ cap status — tampil progress today PnL vs daily $ loss limit */}
+            {accountHealth.isNanoMode && (accountHealth.nanoMaxDailyLossUsd ?? 0) > 0 && (() => {
+              const used = Math.abs(Math.min(accountHealth.todayRealizedPnlUsd ?? 0, 0))
+              const cap  = accountHealth.nanoMaxDailyLossUsd ?? 5
+              const pct  = Math.min(used / cap, 1)
+              const danger = pct >= 0.6
+              return (
+                <span className={cn(
+                  'px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide border',
+                  danger
+                    ? 'bg-red-500/15 text-red-600 border-red-500/40 dark:text-red-400 animate-pulse'
+                    : 'bg-amber-500/10 text-amber-600 border-amber-500/30 dark:text-amber-400',
+                )}
+                title={`Daily loss budget: -$${cap.toFixed(2)}. Saat habis = auto-halt sampai UTC midnight. Floor equity: $${(accountHealth.nanoEquityFloorUsd ?? 20).toFixed(0)}.`}>
+                  Daily: -${used.toFixed(2)}/${cap.toFixed(0)}
+                  {accountHealth.todayRealizedPnlUsd && accountHealth.todayRealizedPnlUsd > 0 ? (
+                    <span className="ml-1 text-emerald-600 dark:text-emerald-400">(+${accountHealth.todayRealizedPnlUsd.toFixed(2)})</span>
+                  ) : null}
+                </span>
+              )
+            })()}
           </div>
           <div className="flex items-center gap-2">
             {accountHealth.isHalted ? (

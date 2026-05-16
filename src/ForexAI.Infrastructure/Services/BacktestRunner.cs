@@ -354,6 +354,8 @@ internal class BacktestSystemStateStub : ISystemStateService
     public SignalDirection? LastLossDirection => null;
     public DateTimeOffset? LastLossAt => null;
     public int CooldownMinutes => 0;  // disabled untuk backtest
+    public decimal NanoMaxDailyLossUsd => 0m;  // disabled untuk backtest
+    public decimal NanoEquityFloorUsd  => 0m;
 
     public void Halt(string reason) { }
     public void Resume() { }

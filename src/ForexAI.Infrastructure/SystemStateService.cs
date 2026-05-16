@@ -29,6 +29,11 @@ public class SystemStateService : ISystemStateService
     public DateTimeOffset? LastLossAt { get; private set; }
     public int CooldownMinutes { get; private set; } = 30;
 
+    // Hard $ caps untuk full-auto Nano safety (modal $30-60).
+    // Default: stop trading kalau hari ini sudah loss > $5, atau equity drop ke ≤ $20.
+    public decimal NanoMaxDailyLossUsd { get; private set; } = 5m;
+    public decimal NanoEquityFloorUsd  { get; private set; } = 20m;
+
     private readonly IModeService _mode;
     private readonly object _lock = new();
 
@@ -116,7 +121,9 @@ public class SystemStateService : ISystemStateService
         int MaxHoldingMinutes = 360,
         SignalDirection? LastLossDirection = null,
         DateTimeOffset? LastLossAt = null,
-        int CooldownMinutes = 30);
+        int CooldownMinutes = 30,
+        decimal NanoMaxDailyLossUsd = 5m,
+        decimal NanoEquityFloorUsd  = 20m);
 
     private void Save_NoLock()
     {
@@ -125,7 +132,8 @@ public class SystemStateService : ISystemStateService
             var snap = new Snapshot(
                 IsHalted, HaltReason, HaltedAt,
                 MaxSpreadPips, MaxConsecutiveLosses, MaxHoldingMinutes,
-                LastLossDirection, LastLossAt, CooldownMinutes);
+                LastLossDirection, LastLossAt, CooldownMinutes,
+                NanoMaxDailyLossUsd, NanoEquityFloorUsd);
             var json = JsonSerializer.Serialize(snap, new JsonSerializerOptions { WriteIndented = true });
             var path = PersistPath;
             var tmp  = path + ".tmp";
@@ -154,6 +162,8 @@ public class SystemStateService : ISystemStateService
                 LastLossDirection    = snap.LastLossDirection;
                 LastLossAt           = snap.LastLossAt;
                 CooldownMinutes      = snap.CooldownMinutes > 0 ? snap.CooldownMinutes : 30;
+                NanoMaxDailyLossUsd  = snap.NanoMaxDailyLossUsd > 0m ? snap.NanoMaxDailyLossUsd : 5m;
+                NanoEquityFloorUsd   = snap.NanoEquityFloorUsd  > 0m ? snap.NanoEquityFloorUsd  : 20m;
             }
         }
         catch { /* corrupt — ignore */ }

@@ -97,6 +97,46 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
             if (peakEquity == 0m) peakEquity = account.Equity;
         }
 
+        // Hard $ caps untuk Nano mode (full-auto safety, modal kecil $30-60)
+        if (_mode.CurrentMode == TradeMode.Real)
+        {
+            var nanoTier = RiskTier.FromEquity(currentEquity, _mode.CurrentMode);
+            if (nanoTier.Name == "nano")
+            {
+                // Floor: equity drop ke level kritis → permanent halt sampai user manual review
+                if (_systemState.NanoEquityFloorUsd > 0m && currentEquity <= _systemState.NanoEquityFloorUsd)
+                {
+                    var msg = $"NANO FLOOR HIT: equity ${currentEquity:F2} ≤ floor ${_systemState.NanoEquityFloorUsd:F2}. PERMANENT HALT — review modal sebelum resume.";
+                    _logger.LogCritical(msg);
+                    _systemState.Halt(msg);
+                    var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
+                    await _positions.SaveAsync(skipped);
+                    return skipped;
+                }
+
+                // Daily $ loss cap: hitung total realized PnL hari ini (UTC day)
+                if (_systemState.NanoMaxDailyLossUsd > 0m)
+                {
+                    var todayUtc = DateTimeOffset.UtcNow.Date;
+                    var allClosed = (await _positions.GetAllAsync())
+                        .Where(p => p.ClosedAt.HasValue &&
+                                    p.ClosedAt.Value.UtcDateTime.Date == todayUtc &&
+                                    (p.Status == TradeStatus.CLOSED_WIN || p.Status == TradeStatus.CLOSED_LOSS))
+                        .ToList();
+                    decimal todayRealizedPnl = allClosed.Sum(p => p.FloatingPnl);
+                    if (todayRealizedPnl <= -_systemState.NanoMaxDailyLossUsd)
+                    {
+                        var msg = $"NANO DAILY LOSS CAP: today realized ${todayRealizedPnl:F2} ≤ -${_systemState.NanoMaxDailyLossUsd:F2}. Auto-halt sampai UTC midnight.";
+                        _logger.LogWarning(msg);
+                        _systemState.Halt(msg);
+                        var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
+                        await _positions.SaveAsync(skipped);
+                        return skipped;
+                    }
+                }
+            }
+        }
+
         // Hard limit: max open positions
         var openCount = await _positions.CountOpenPositionsAsync();
         if (openCount >= MaxOpenPositions)

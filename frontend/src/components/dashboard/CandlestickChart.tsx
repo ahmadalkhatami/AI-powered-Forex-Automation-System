@@ -154,6 +154,12 @@ export function CandlestickChart({
     }
   }
 
+  const handleDeleteSelected = () => {
+    if (!selectedDrawingId) return
+    setDrawings((prev) => prev.filter((d) => d.id !== selectedDrawingId))
+    setSelectedDrawingId(null)
+  }
+
   const toggleCollapsed = () => {
     setIsCollapsed((prev) => {
       const next = !prev
@@ -580,6 +586,8 @@ export function CandlestickChart({
                   activeTool={activeTool}
                   onSelectTool={setActiveTool}
                   onClearAll={handleClearAllDrawings}
+                  onDeleteSelected={handleDeleteSelected}
+                  selectedId={selectedDrawingId}
                   drawingCount={drawings.length}
                 />
               </div>

@@ -6,7 +6,7 @@
  * relevan saat user zoom/pan/ganti timeframe.
  */
 
-export type DrawingType = 'hline' | 'trendline' | 'rectangle'
+export type DrawingType = 'hline' | 'trendline' | 'rectangle' | 'ray' | 'text' | 'measure'
 
 export interface DrawingPoint {
   time: number   // Unix timestamp seconds (sesuai lightweight-charts)
@@ -22,15 +22,19 @@ export interface DrawingStyle {
 export interface Drawing {
   id: string
   type: DrawingType
-  points: DrawingPoint[]   // hline: 1 point (cuma price dipakai), trendline: 2, rectangle: 2 (diagonal)
+  points: DrawingPoint[]   // hline/text: 1, trendline/rectangle/ray/measure: 2
   style: DrawingStyle
   createdAt: string        // ISO timestamp
+  text?: string            // untuk type === 'text' (annotation content)
 }
 
 export const DEFAULT_STYLES: Record<DrawingType, DrawingStyle> = {
   hline:     { color: '#fbbf24', width: 1, dashed: true },   // amber
   trendline: { color: '#60a5fa', width: 2 },                 // blue
   rectangle: { color: 'rgba(168, 85, 247, 0.5)', width: 1 }, // purple translucent
+  ray:       { color: '#a3e635', width: 2 },                 // lime — extend infinity
+  text:      { color: '#e5e7eb', width: 1 },                 // gray-200 — label
+  measure:   { color: 'rgba(96, 165, 250, 0.6)', width: 1 }, // blue translucent
 }
 
 const STORAGE_PREFIX = 'forexai.drawings'
@@ -93,10 +97,17 @@ export function hitTest(
     if (!c) return false
     return Math.abs(py - c.y) <= HIT_THRESHOLD
   }
-  if (drawing.type === 'trendline') {
+  if (drawing.type === 'trendline' || drawing.type === 'measure') {
     const a = coords(drawing.points[0])
     const b = coords(drawing.points[1])
     if (!a || !b) return false
+    return distanceToSegment(px, py, a.x, a.y, b.x, b.y) <= HIT_THRESHOLD
+  }
+  if (drawing.type === 'ray') {
+    const a = coords(drawing.points[0])
+    const b = coords(drawing.points[1])
+    if (!a || !b) return false
+    // Ray: extend dari A melewati B hingga ujung kanvas
     return distanceToSegment(px, py, a.x, a.y, b.x, b.y) <= HIT_THRESHOLD
   }
   if (drawing.type === 'rectangle') {
@@ -105,12 +116,19 @@ export function hitTest(
     if (!a || !b) return false
     const x1 = Math.min(a.x, b.x), x2 = Math.max(a.x, b.x)
     const y1 = Math.min(a.y, b.y), y2 = Math.max(a.y, b.y)
-    // Hit kalau di-klik tepat di border (4 sisi)
     const onLeft  = Math.abs(px - x1) <= HIT_THRESHOLD && py >= y1 && py <= y2
     const onRight = Math.abs(px - x2) <= HIT_THRESHOLD && py >= y1 && py <= y2
     const onTop   = Math.abs(py - y1) <= HIT_THRESHOLD && px >= x1 && px <= x2
     const onBot   = Math.abs(py - y2) <= HIT_THRESHOLD && px >= x1 && px <= x2
     return onLeft || onRight || onTop || onBot
+  }
+  if (drawing.type === 'text') {
+    const c = coords(drawing.points[0])
+    if (!c) return false
+    // Approximate text box: 6px char × len, height 16
+    const len = (drawing.text ?? '').length
+    const w = Math.max(20, len * 6)
+    return px >= c.x - 2 && px <= c.x + w + 2 && py >= c.y - 10 && py <= c.y + 6
   }
   return false
 }

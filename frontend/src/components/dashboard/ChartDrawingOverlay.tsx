@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { IChartApi, ISeriesApi, Time, UTCTimestamp } from 'lightweight-charts'
+import type { IChartApi, ISeriesApi, Time, UTCTimestamp, MouseEventParams } from 'lightweight-charts'
 import {
   type Drawing,
   type DrawingPoint,
@@ -27,15 +27,13 @@ interface Props {
 /**
  * Canvas overlay di atas chart untuk render & interaksi drawing.
  *
- * Koordinat: drawing disimpan dalam data space (time + price), di-render
- * ke pixel via chart API. Saat user zoom/pan, kita subscribe ke range
- * change events dan trigger redraw.
- *
- * Pointer events:
- *  - activeTool === 'cursor': pointer-events:none → chart terima mouse (zoom/pan normal)
- *  - activeTool === drawing tool: pointer-events:auto → kita capture clicks
- *  - Klik dengan tool aktif: track drawing creation (1 or 2 click depending on tool)
- *  - Klik dengan cursor di drawing existing: select (handled in parent)
+ * Pointer events strategy:
+ * - activeTool === drawing tool: pointer-events:auto, capture clicks untuk create
+ * - activeTool === cursor:
+ *    - hover-over-drawing: pointer-events:auto (klik untuk select)
+ *    - hover-empty:        pointer-events:none (chart receives pan/zoom)
+ *   Tracking pakai chart.subscribeCrosshairMove karena fires meski overlay
+ *   pointer-events:none (event sampai chart canvas di bawahnya).
  */
 export function ChartDrawingOverlay({
   chart,
@@ -53,8 +51,10 @@ export function ChartDrawingOverlay({
   const [pendingPoint, setPendingPoint] = useState<DrawingPoint | null>(null)
   // Pixel-tracking mouse untuk preview saat drawing in-progress
   const [hoverPixel, setHoverPixel] = useState<{ x: number; y: number } | null>(null)
+  // Apakah kursor sedang di atas drawing existing (cursor mode only)
+  const [hoveringDrawing, setHoveringDrawing] = useState(false)
 
-  // Konversi data point → pixel coord (return null kalau di luar visible range)
+  // Konversi data point → pixel coord
   const dataToPixel = useCallback(
     (point: DrawingPoint): { x: number; y: number } | null => {
       if (!chart || !series) return null
@@ -89,14 +89,12 @@ export function ChartDrawingOverlay({
     if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
       canvas.width = width * dpr
       canvas.height = height * dpr
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    } else {
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, width, height)
 
     for (const d of drawings) {
-      drawShape(ctx, d, dataToPixel, width, d.id === selectedId)
+      drawShape(ctx, d, dataToPixel, width, height, d.id === selectedId)
     }
 
     // Preview drawing-in-progress
@@ -112,6 +110,12 @@ export function ChartDrawingOverlay({
           ctx.moveTo(start.x, start.y)
           ctx.lineTo(hoverPixel.x, hoverPixel.y)
           ctx.stroke()
+        } else if (activeTool === 'ray') {
+          const end = extendRay(start, hoverPixel, width, height)
+          ctx.beginPath()
+          ctx.moveTo(start.x, start.y)
+          ctx.lineTo(end.x, end.y)
+          ctx.stroke()
         } else if (activeTool === 'rectangle') {
           ctx.strokeRect(
             Math.min(start.x, hoverPixel.x),
@@ -119,13 +123,15 @@ export function ChartDrawingOverlay({
             Math.abs(hoverPixel.x - start.x),
             Math.abs(hoverPixel.y - start.y),
           )
+        } else if (activeTool === 'measure') {
+          drawMeasure(ctx, start, hoverPixel, pendingPoint, pixelToData(hoverPixel.x, hoverPixel.y))
         }
         ctx.setLineDash([])
       }
     }
-  }, [drawings, dataToPixel, width, height, selectedId, pendingPoint, hoverPixel, activeTool])
+  }, [drawings, dataToPixel, pixelToData, width, height, selectedId, pendingPoint, hoverPixel, activeTool])
 
-  // Subscribe ke chart events untuk trigger redraw
+  // Subscribe ke visible range change untuk redraw saat zoom/pan
   useEffect(() => {
     if (!chart) return
     const ts = chart.timeScale()
@@ -136,12 +142,32 @@ export function ChartDrawingOverlay({
     }
   }, [chart, render])
 
-  // Redraw saat drawings/width/height/preview berubah
+  // Track cursor position via chart crosshair untuk hover detection (cursor mode)
+  useEffect(() => {
+    if (!chart) return
+    const handler = (param: MouseEventParams) => {
+      if (activeTool !== 'cursor') {
+        setHoveringDrawing(false)
+        return
+      }
+      if (!param.point) {
+        setHoveringDrawing(false)
+        return
+      }
+      const { x, y } = param.point
+      const isOver = drawings.some((d) => hitTest(d, x, y, dataToPixel))
+      setHoveringDrawing(isOver)
+    }
+    chart.subscribeCrosshairMove(handler)
+    return () => chart.unsubscribeCrosshairMove(handler)
+  }, [chart, drawings, dataToPixel, activeTool])
+
+  // Redraw saat dependency render() berubah
   useEffect(() => {
     render()
   }, [render])
 
-  // Mouse interactions
+  // Click handler — hanya fires saat pointer-events:auto
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       const rect = (e.target as HTMLCanvasElement).getBoundingClientRect()
@@ -155,41 +181,56 @@ export function ChartDrawingOverlay({
         return
       }
 
-      // Drawing tool active
       const dataPoint = pixelToData(px, py)
       if (!dataPoint) return
 
+      // 1-click tools
       if (activeTool === 'hline') {
-        // 1-click tool: langsung buat hline
-        const newDrawing: Drawing = {
+        addDrawing({
           id: makeId(),
           type: 'hline',
           points: [dataPoint],
           style: { ...DEFAULT_STYLES.hline },
           createdAt: new Date().toISOString(),
-        }
-        onDrawingsChange([...drawings, newDrawing])
+        })
         return
       }
 
-      // 2-click tools: trendline, rectangle
+      if (activeTool === 'text') {
+        const text = window.prompt('Annotation text:', '')?.trim()
+        if (!text) return
+        addDrawing({
+          id: makeId(),
+          type: 'text',
+          points: [dataPoint],
+          style: { ...DEFAULT_STYLES.text },
+          createdAt: new Date().toISOString(),
+          text,
+        })
+        return
+      }
+
+      // 2-click tools: trendline, rectangle, ray, measure
       if (!pendingPoint) {
         setPendingPoint(dataPoint)
       } else {
-        const newDrawing: Drawing = {
+        addDrawing({
           id: makeId(),
           type: activeTool as DrawingType,
           points: [pendingPoint, dataPoint],
           style: { ...DEFAULT_STYLES[activeTool as DrawingType] },
           createdAt: new Date().toISOString(),
-        }
-        onDrawingsChange([...drawings, newDrawing])
+        })
         setPendingPoint(null)
         setHoverPixel(null)
       }
     },
-    [activeTool, drawings, dataToPixel, pixelToData, onDrawingsChange, pendingPoint, onSelectedIdChange],
+    [activeTool, drawings, dataToPixel, pixelToData, pendingPoint, onSelectedIdChange],
   )
+
+  const addDrawing = (drawing: Drawing) => {
+    onDrawingsChange([...drawings, drawing])
+  }
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -218,11 +259,14 @@ export function ChartDrawingOverlay({
     setHoverPixel(null)
   }, [activeTool])
 
-  // Penting: pointer-events HARUS none di cursor mode supaya chart bisa pan/zoom normal.
-  // Individual drawing select-delete di-defer ke Stage 2 (perlu pointer event forwarding).
-  // Untuk Stage 1, delete pakai "Clear all" di toolbar.
-  const pointerActive = activeTool !== 'cursor'
-  const cursorStyle = activeTool === 'cursor' ? 'default' : 'crosshair'
+  // Cursor mode + hover di drawing → capture click untuk select.
+  // Cursor mode + tidak hover → pass-through ke chart untuk pan/zoom.
+  // Drawing tool aktif → selalu capture.
+  const pointerActive = activeTool !== 'cursor' || hoveringDrawing
+  const cursorStyle =
+    activeTool === 'cursor'
+      ? (hoveringDrawing ? 'pointer' : 'default')
+      : 'crosshair'
 
   return (
     <canvas
@@ -243,11 +287,94 @@ export function ChartDrawingOverlay({
   )
 }
 
+/**
+ * Extend ray dari `from` melewati `through` sampai ujung kanvas.
+ * Return titik di edge yang dilewati garis.
+ */
+function extendRay(
+  from: { x: number; y: number },
+  through: { x: number; y: number },
+  width: number,
+  height: number,
+): { x: number; y: number } {
+  const dx = through.x - from.x
+  const dy = through.y - from.y
+  if (dx === 0 && dy === 0) return through
+
+  // Cari t terbesar > 0 sehingga (from + t*delta) masih dalam canvas
+  const ts: number[] = []
+  if (dx > 0) ts.push((width - from.x) / dx)
+  if (dx < 0) ts.push((0 - from.x) / dx)
+  if (dy > 0) ts.push((height - from.y) / dy)
+  if (dy < 0) ts.push((0 - from.y) / dy)
+  const validTs = ts.filter((t) => t > 0)
+  if (validTs.length === 0) return through
+  const t = Math.min(...validTs)
+  return { x: from.x + t * dx, y: from.y + t * dy }
+}
+
+/**
+ * Draw measure box (preview saat drag, atau persisted setelah klik kedua).
+ * Shows pips diff + % change + time span.
+ */
+function drawMeasure(
+  ctx: CanvasRenderingContext2D,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  startData: DrawingPoint,
+  endData: DrawingPoint | null,
+) {
+  // Box semi-transparan
+  ctx.fillStyle = 'rgba(96, 165, 250, 0.12)'
+  ctx.fillRect(
+    Math.min(start.x, end.x),
+    Math.min(start.y, end.y),
+    Math.abs(end.x - start.x),
+    Math.abs(end.y - start.y),
+  )
+  ctx.strokeStyle = 'rgba(96, 165, 250, 0.6)'
+  ctx.lineWidth = 1
+  ctx.strokeRect(
+    Math.min(start.x, end.x),
+    Math.min(start.y, end.y),
+    Math.abs(end.x - start.x),
+    Math.abs(end.y - start.y),
+  )
+
+  if (!endData) return
+  const priceDelta = endData.price - startData.price
+  const pips = Math.round(priceDelta * 10000)
+  const pct = (priceDelta / startData.price) * 100
+  const timeDelta = endData.time - startData.time
+  const timeLabel = formatTimeDelta(timeDelta)
+
+  // Label background + text
+  const label = `${pips >= 0 ? '+' : ''}${pips} pip · ${pct >= 0 ? '+' : ''}${pct.toFixed(3)}% · ${timeLabel}`
+  ctx.font = '11px ui-monospace, SFMono-Regular, monospace'
+  const metrics = ctx.measureText(label)
+  const padX = 6, padY = 4
+  const lblX = Math.min(start.x, end.x) + 4
+  const lblY = Math.min(start.y, end.y) - 20
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.9)'
+  ctx.fillRect(lblX, lblY, metrics.width + padX * 2, 16 + padY)
+  ctx.fillStyle = priceDelta >= 0 ? '#22c55e' : '#ef4444'
+  ctx.textBaseline = 'top'
+  ctx.fillText(label, lblX + padX, lblY + padY)
+}
+
+function formatTimeDelta(seconds: number): string {
+  const abs = Math.abs(seconds)
+  if (abs < 3600) return `${Math.round(abs / 60)}m`
+  if (abs < 86400) return `${(abs / 3600).toFixed(1)}h`
+  return `${(abs / 86400).toFixed(1)}d`
+}
+
 function drawShape(
   ctx: CanvasRenderingContext2D,
   d: Drawing,
   dataToPixel: (p: DrawingPoint) => { x: number; y: number } | null,
   canvasWidth: number,
+  canvasHeight: number,
   selected: boolean,
 ) {
   ctx.strokeStyle = d.style.color
@@ -261,14 +388,12 @@ function drawShape(
     ctx.moveTo(0, a.y)
     ctx.lineTo(canvasWidth, a.y)
     ctx.stroke()
-    // Price label di sebelah kanan
-    const priceLabel = d.points[0].price.toFixed(5)
     ctx.setLineDash([])
     ctx.fillStyle = d.style.color
     ctx.font = '10px ui-monospace, SFMono-Regular, monospace'
     ctx.textAlign = 'right'
     ctx.textBaseline = 'middle'
-    ctx.fillText(priceLabel, canvasWidth - 6, a.y - 6)
+    ctx.fillText(d.points[0].price.toFixed(5), canvasWidth - 6, a.y - 6)
   } else if (d.type === 'trendline') {
     const a = dataToPixel(d.points[0])
     const b = dataToPixel(d.points[1])
@@ -276,6 +401,15 @@ function drawShape(
     ctx.beginPath()
     ctx.moveTo(a.x, a.y)
     ctx.lineTo(b.x, b.y)
+    ctx.stroke()
+  } else if (d.type === 'ray') {
+    const a = dataToPixel(d.points[0])
+    const b = dataToPixel(d.points[1])
+    if (!a || !b) return
+    const end = extendRay(a, b, canvasWidth, canvasHeight)
+    ctx.beginPath()
+    ctx.moveTo(a.x, a.y)
+    ctx.lineTo(end.x, end.y)
     ctx.stroke()
   } else if (d.type === 'rectangle') {
     const a = dataToPixel(d.points[0])
@@ -285,13 +419,32 @@ function drawShape(
     const y = Math.min(a.y, b.y)
     const w = Math.abs(b.x - a.x)
     const h = Math.abs(b.y - a.y)
-    // Fill semi-transparan + border solid
     ctx.fillStyle = d.style.color.includes('rgba')
       ? d.style.color
       : d.style.color + '22'
     ctx.fillRect(x, y, w, h)
     ctx.setLineDash([])
     ctx.strokeRect(x, y, w, h)
+  } else if (d.type === 'text') {
+    const a = dataToPixel(d.points[0])
+    if (!a) return
+    ctx.setLineDash([])
+    ctx.font = '12px system-ui, -apple-system, sans-serif'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    const text = d.text ?? ''
+    const metrics = ctx.measureText(text)
+    const padX = 4, padY = 2
+    // Background pill
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.85)'
+    ctx.fillRect(a.x - padX, a.y - 8, metrics.width + padX * 2, 16 + padY)
+    ctx.fillStyle = d.style.color
+    ctx.fillText(text, a.x, a.y)
+  } else if (d.type === 'measure') {
+    const a = dataToPixel(d.points[0])
+    const b = dataToPixel(d.points[1])
+    if (!a || !b) return
+    drawMeasure(ctx, a, b, d.points[0], d.points[1])
   }
 
   // Selection highlight: titik kecil di endpoints

@@ -24,6 +24,9 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { computeSMA, computeRSI } from '@/lib/indicators'
 import type { CandleBar, ChartTimeframe, TradePositionResponse } from '@/lib/types'
+import { type Drawing, loadDrawings, saveDrawings } from '@/lib/drawings'
+import { ChartToolbar, type ToolMode } from './ChartToolbar'
+import { ChartDrawingOverlay } from './ChartDrawingOverlay'
 
 interface TradeOverlay {
   entry: number
@@ -102,10 +105,50 @@ export function CandlestickChart({
   const [tooltip, setTooltip] = useState<OhlcTooltip | null>(null)
   const [isCollapsed, setIsCollapsed] = useState(false)
 
+  // Drawing tool state — disimpan per pair+TF, load saat mount, persist saat change
+  const [activeTool, setActiveTool] = useState<ToolMode>('cursor')
+  const [drawings, setDrawings] = useState<Drawing[]>([])
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null)
+  const [chartSize, setChartSize] = useState<{ width: number; height: number }>({ width: 0, height: 480 })
+
   // Load collapse state dari localStorage (persisted across reload)
   useEffect(() => {
     setIsCollapsed(localStorage.getItem('forexai.chartCollapsed') === 'true')
   }, [])
+
+  // Load drawings saat pair/timeframe berubah
+  useEffect(() => {
+    setDrawings(loadDrawings(pair, timeframe))
+    setSelectedDrawingId(null)
+  }, [pair, timeframe])
+
+  // Persist drawings saat berubah
+  useEffect(() => {
+    saveDrawings(pair, timeframe, drawings)
+  }, [pair, timeframe, drawings])
+
+  // DEL/Backspace untuk hapus drawing yang dipilih
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawingId) {
+        const target = e.target as HTMLElement
+        const tag = target.tagName.toLowerCase()
+        if (tag === 'input' || tag === 'textarea' || target.isContentEditable) return
+        setDrawings((prev) => prev.filter((d) => d.id !== selectedDrawingId))
+        setSelectedDrawingId(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedDrawingId])
+
+  const handleClearAllDrawings = () => {
+    if (drawings.length === 0) return
+    if (window.confirm(`Hapus semua ${drawings.length} drawing di ${pair} ${timeframe}?`)) {
+      setDrawings([])
+      setSelectedDrawingId(null)
+    }
+  }
 
   const toggleCollapsed = () => {
     setIsCollapsed((prev) => {
@@ -141,6 +184,7 @@ export function CandlestickChart({
       width: mainContainerRef.current.clientWidth,
       height: 480,
     })
+    setChartSize({ width: mainContainerRef.current.clientWidth, height: 480 })
 
     const candleSeries = mainChart.addSeries(CandlestickSeries, {
       upColor: '#22c55e',
@@ -261,8 +305,12 @@ export function CandlestickChart({
     })
 
     const ro = new ResizeObserver(() => {
-      if (mainContainerRef.current)
-        mainChart.applyOptions({ width: mainContainerRef.current.clientWidth })
+      if (mainContainerRef.current) {
+        const w = mainContainerRef.current.clientWidth
+        const h = mainContainerRef.current.clientHeight || 480
+        mainChart.applyOptions({ width: w })
+        setChartSize({ width: w, height: h })
+      }
       if (rsiContainerRef.current)
         rsiChart.applyOptions({ width: rsiContainerRef.current.clientWidth })
     })
@@ -522,6 +570,16 @@ export function CandlestickChart({
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
               </span>
             )}
+            {!isCollapsed && (
+              <div className="border-l border-border/40 pl-3 ml-1">
+                <ChartToolbar
+                  activeTool={activeTool}
+                  onSelectTool={setActiveTool}
+                  onClearAll={handleClearAllDrawings}
+                  drawingCount={drawings.length}
+                />
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3 text-xs">
             <button
@@ -549,7 +607,19 @@ export function CandlestickChart({
         className="p-0 pb-2 relative"
         style={isCollapsed ? { display: 'none' } : undefined}
       >
-        <div ref={mainContainerRef} className="w-full" style={{ minHeight: 480 }} />
+        <div ref={mainContainerRef} className="w-full relative" style={{ minHeight: 480 }}>
+          <ChartDrawingOverlay
+            chart={mainChartRef.current}
+            series={candleSeriesRef.current}
+            activeTool={activeTool}
+            drawings={drawings}
+            onDrawingsChange={setDrawings}
+            selectedId={selectedDrawingId}
+            onSelectedIdChange={setSelectedDrawingId}
+            width={chartSize.width}
+            height={chartSize.height}
+          />
+        </div>
         {candles.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground pointer-events-none">
             <div className="text-center space-y-1">

@@ -94,6 +94,11 @@ export function CandlestickChart({
   const rsiSeriesRef = useRef<ISeriesApi<'Line'> | null>(null)
   const priceLinesRef = useRef<IPriceLine[]>([])
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
+  // Track apakah initial fit-to-content sudah dilakukan untuk dataset ini.
+  // Direset saat timeframe berubah (dataset baru) supaya user tidak harus
+  // manual scroll/zoom setelah ganti TF. Tapi TIDAK direset saat candle
+  // update biasa — supaya zoom/pan yang sudah user atur tetap dipertahankan.
+  const initialFitDoneRef = useRef(false)
   const [tooltip, setTooltip] = useState<OhlcTooltip | null>(null)
   const [isCollapsed, setIsCollapsed] = useState(false)
 
@@ -330,16 +335,27 @@ export function CandlestickChart({
         .filter((p): p is { time: UTCTimestamp; value: number } => p.value !== null),
     )
 
-    mainChartRef.current?.timeScale().fitContent()
+    // Hanya fit-to-content saat pertama kali data masuk untuk dataset ini.
+    // Pada update berikutnya (live candle tick), biarkan zoom/pan user
+    // tetap apa adanya — tidak boleh snap back ke posisi awal.
+    if (!initialFitDoneRef.current) {
+      mainChartRef.current?.timeScale().fitContent()
+      initialFitDoneRef.current = true
+    }
   }, [candles])
 
-  // Saat re-expand dari collapsed: paksa chart re-fit ke width container baru
+  // Reset fit-state saat ganti timeframe — dataset berbeda, perlu fit ulang.
+  useEffect(() => {
+    initialFitDoneRef.current = false
+  }, [timeframe])
+
+  // Saat re-expand dari collapsed: sesuaikan width container — TIDAK pakai
+  // fitContent supaya zoom/pan user dipertahankan.
   useEffect(() => {
     if (isCollapsed) return
     requestAnimationFrame(() => {
       if (mainContainerRef.current && mainChartRef.current) {
         mainChartRef.current.applyOptions({ width: mainContainerRef.current.clientWidth })
-        mainChartRef.current.timeScale().fitContent()
       }
       if (rsiContainerRef.current && rsiChartRef.current) {
         rsiChartRef.current.applyOptions({ width: rsiContainerRef.current.clientWidth })

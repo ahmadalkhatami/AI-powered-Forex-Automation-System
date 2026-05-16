@@ -145,6 +145,7 @@ function mapToPositionCard(pos: TradePositionResponse): PositionCardData {
     entry: pos.entry,
     floatingPnl: pos.floatingPnl,
     floatingPnlPips: pos.floatingPnlPips,
+    lotSize: pos.lotSize,
     status,
     closedAt: pos.closedAt ?? undefined,
   }

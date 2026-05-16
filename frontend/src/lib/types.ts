@@ -165,8 +165,9 @@ export interface PositionCardData {
   direction: 'BUY' | 'SELL'
   entry: number
   currentPrice?: number
-  floatingPnl: number       // in USD
+  floatingPnl: number       // in USD (from broker tick sync)
   floatingPnlPips: number
+  lotSize?: number          // for frontend interpolation between ticks
   distanceToSlPips?: number
   distanceToTpPips?: number
   status: 'ACTIVE' | 'CLOSED_WIN' | 'CLOSED_LOSS'

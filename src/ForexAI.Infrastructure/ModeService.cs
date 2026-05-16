@@ -16,8 +16,8 @@ public class ModeService : IModeService
 
     public ModeService()
     {
-        // Persist di _bmad-output/ root (BUKAN di implementation-artifacts-* karena
-        // itu lokasinya bergantung mode — chicken-and-egg).
+        // Persist di data/ root (BUKAN di data/{demo,real}/ karena lokasi mode-aware
+        // itu sendiri bergantung mode — chicken-and-egg).
         Directory.CreateDirectory(ProjectPaths.ArtifactsDir);
         _persistPath = Path.Combine(ProjectPaths.ArtifactsDir, "mode-state.json");
         Load();

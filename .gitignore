@@ -10,22 +10,28 @@ obj/
 packages/
 project.lock.json
 
-# Runtime data (changes on every test/execution run)
-_bmad-output/implementation-artifacts/execution-log.json
-_bmad-output/implementation-artifacts/position-status.json
-_bmad-output/implementation-artifacts/mifx-candle-cache.json
-# Accidental cache if dotnet run was started from src/ForexAI.API
-src/ForexAI.API/_bmad-output/
+# Runtime data (changes setiap test/execution run)
+data/demo/execution-log.json
+data/demo/position-status.json
+data/demo/mifx-candle-cache.json
+data/demo/signal-history.json
+data/demo/system-state.json
+data/demo/audit-log.jsonl
+data/real/execution-log.json
+data/real/position-status.json
+data/real/mifx-candle-cache.json
+data/real/signal-history.json
+data/real/system-state.json
+data/real/audit-log.jsonl
 
-# Generated HTML previews
-_bmad-output/planning-artifacts/*.html
+# Accidental cache kalau dotnet run di-start dari src/ForexAI.API
+src/ForexAI.API/data/
 
 # Local IDE / tool settings
 .claude/settings.local.json
 
+# Test output leftover
+test_out.txt
+
 # macOS
 .DS_Store
-
-# Audit log (rotating, runtime)
-_bmad-output/implementation-artifacts/audit-log.jsonl
-_bmad-output/implementation-artifacts/system-state.json

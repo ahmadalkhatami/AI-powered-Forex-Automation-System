@@ -24,9 +24,6 @@ public static class DependencyInjection
     {
         var mifx = configuration.GetSection(MifxSettings.Section).Get<MifxSettings>() ?? new();
 
-        // One-time migration: rename legacy implementation-artifacts/ → -demo (preserve old data)
-        ProjectPaths.MigrateLegacyArtifactsDir();
-
         // Mode service (HARUS dideklarasi sebelum repositories yang depend on it)
         services.AddSingleton<IModeService, ModeService>();
 

@@ -5,8 +5,9 @@
 | Tool | Version | Notes |
 |------|---------|-------|
 | .NET SDK | **8.0+** | `dotnet --version` |
-| Node.js | 20+ | For Epic 2–4 frontend |
-| Git | any | |
+| Node.js | 20+ | Frontend |
+| MetaTrader 5 | latest | Optional — untuk live data + execution. Bisa pakai wine di macOS/Linux. |
+| MIFX demo/real account | — | Sumber market data utama |
 
 ---
 
@@ -16,25 +17,21 @@
 git clone <repo>
 cd AI-powered-Forex-Automation-System
 
-# Build entire solution
+# 1. Build solution
 dotnet build ForexAI.sln
 
-# Run API
+# 2. Start backend API
 dotnet run --project src/ForexAI.API
-# → http://localhost:5000/swagger
+# → http://localhost:8080  (Swagger: /swagger)
+
+# 3. Start frontend dashboard (terminal lain)
+cd frontend
+npm install
+npm run dev
+# → http://localhost:3000
 ```
 
-### Required Planning Artifacts
-
-The stub services read from BMAD output files. Before running the API, generate them via the BMAD skills:
-
-```bash
-# In Claude Code:
-/forex-market-analysis-signal    # → _bmad-output/planning-artifacts/signal-output.json
-/forex-risk-management-gate      # → _bmad-output/planning-artifacts/risk-decision.json
-```
-
-These files are committed to the repo (current EUR/USD M15 fixture), so `dotnet run` works out of the box.
+Tanpa MT5 EA running, endpoint signal analysis return error (`InvalidOperationException: EA not connected`). Untuk smoke test tanpa EA, jalankan integration test (lihat di bawah).
 
 ---
 
@@ -43,18 +40,22 @@ These files are committed to the repo (current EUR/USD M15 fixture), so `dotnet 
 ```
 AI-powered-Forex-Automation-System/
 ├── src/
-│   ├── ForexAI.Domain/             # Entities, value objects, interfaces, enums
-│   ├── ForexAI.Application/        # MediatR use cases, DI registration
-│   ├── ForexAI.Infrastructure/     # Repositories, services, DI registration
-│   └── ForexAI.API/                # Controllers, request models, Program.cs
+│   ├── ForexAI.Domain/             # Entities, value objects, interfaces
+│   ├── ForexAI.Application/        # Use cases (no infra deps)
+│   ├── ForexAI.Infrastructure/     # Mifx EA bridge, JSON repos, services
+│   └── ForexAI.API/                # ASP.NET Core controllers + SignalR hub
 ├── tests/
-│   └── ForexAI.Integration/        # WebApplicationFactory pipeline smoke test
-├── _bmad-output/
-│   ├── planning-artifacts/         # PRD, architecture, signal/risk JSON fixtures
-│   └── implementation-artifacts/  # Story files, sprint-status.yaml, execution-log.json
-├── skills/                         # Custom BMAD forex skills
-├── docs/                           # This wiki
-├── ForexAI.sln                     # Solution file
+│   └── ForexAI.Integration/        # xUnit + WebApplicationFactory
+├── frontend/                       # Next.js 14 dashboard
+├── mql5/                           # MetaTrader 5 Expert Advisor
+├── data/                           # Runtime data (mostly gitignored)
+│   ├── mode-state.json
+│   ├── demo/                       # Demo trade history
+│   └── real/                       # Real trade history
+├── docs/                           # Wiki
+│   └── history/                    # Story specs Epic 1-4 (historical)
+├── scripts/                        # Bash helper (e.g. setup-mt5.sh)
+├── ForexAI.sln
 └── CLAUDE.md                       # AI agent instructions
 ```
 
@@ -66,68 +67,102 @@ AI-powered-Forex-Automation-System/
 # All tests
 dotnet test ForexAI.sln
 
-# Integration tests only (verbose)
+# Integration test verbose
 dotnet test tests/ForexAI.Integration/ --logger "console;verbosity=normal"
 ```
 
-The integration test (`PipelineIntegrationTests`) runs the full 4-step pipeline against an in-memory test host:
+[`PipelineIntegrationTests`](../tests/ForexAI.Integration/PipelineIntegrationTests.cs) menjalankan full pipeline di in-memory test host. Test pakai `FakeMarketDataService` ([tests/ForexAI.Integration/FakeMarketDataService.cs](../tests/ForexAI.Integration/FakeMarketDataService.cs)) — deterministic bullish setup. Tidak perlu MT5 EA running.
 
-```
-POST /api/signal/analyze  →  200 (BUY signal)
-POST /api/risk/evaluate   →  200 (GO_WITH_CAUTION)
-POST /api/trade/execute   →  200 (ACTIVE position)
-GET  /api/position/EURUSD →  200 (same position)
+Repositories di-replace dengan instance temp-file (`Path.GetTempFileName()`) supaya tidak bleed ke `data/demo/execution-log.json`.
+
+---
+
+## MT5 Expert Advisor Setup
+
+Source: [mql5/ForexAI_Bridge.mq5](../mql5/ForexAI_Bridge.mq5), compiled: `ForexAI_Bridge.ex5`.
+
+### Manual deploy
+
+1. Copy `.mq5` + `.ex5` ke `<MT5_TERMINAL>/MQL5/Experts/`
+2. Restart MT5 (atau Navigator → Refresh)
+3. Attach EA ke chart EURUSD M15
+4. Enable **Allow algo trading** + **Allow WebRequest for listed URL** → tambahkan `http://localhost:8080`
+5. EA mulai push tick + candle ke `POST /api/mifx-bridge/tick`, `/api/mifx-bridge/candle`, dst.
+
+### Automated deploy
+
+```bash
+curl -X POST http://localhost:8080/api/ea/deploy
 ```
 
-> Each test run appends a new position to `execution-log.json`. This is expected behavior.
+`EaDeployService` cari MT5 terminal folder (Windows path biasa: `%APPDATA%/MetaQuotes/Terminal/<hash>/MQL5/Experts/`), copy file, optionally trigger compile via MetaEditor CLI.
+
+`scripts/setup-mt5.sh` — helper Bash untuk macOS wine setup.
 
 ---
 
 ## Adding a New Use Case
 
-1. **Domain** — add interface to `src/ForexAI.Domain/Interfaces/` if new infrastructure needed
-2. **Application** — add `CommandName.cs` + `CommandHandler.cs` under `src/ForexAI.Application/UseCases/NewFeature/`
-3. **Infrastructure** — implement any new interfaces, register in `DependencyInjection.cs`
-4. **API** — add endpoint to existing controller or create new one
-
-MediatR is auto-registered via `services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(...))` — no manual handler registration needed.
+1. **Domain** — kalau perlu interface baru, tambah di [src/ForexAI.Domain/Interfaces/](../src/ForexAI.Domain/Interfaces/)
+2. **Application** — bikin folder baru di [src/ForexAI.Application/UseCases/NewFeature/](../src/ForexAI.Application/UseCases/) berisi request + handler
+3. **Infrastructure** — implement interface baru, register di [DependencyInjection.cs](../src/ForexAI.Infrastructure/DependencyInjection.cs)
+4. **API** — tambah endpoint di controller existing atau bikin controller baru di [src/ForexAI.API/Controllers/](../src/ForexAI.API/Controllers/)
 
 ---
 
-## BMAD Workflow
+## Adding a New Broker Adapter
 
-Stories are managed via the BMAD framework:
+Implement `IBrokerService`:
 
-```bash
-# Check sprint status
-cat _bmad-output/implementation-artifacts/sprint-status.yaml
-
-# Create next story
-/bmad-create-story
-
-# Implement story
-/bmad-dev-story
+```csharp
+public class MyBrokerService : IBrokerService
+{
+    public Task<BrokerExecutionResult> PlaceOrderAsync(TradeParameters p) { ... }
+    public Task ClosePositionAsync(string tradeId) { ... }
+    public Task<BrokerAccountStatus> GetAccountStatusAsync() { ... }
+}
 ```
 
-Story files live in `_bmad-output/implementation-artifacts/` as `{epic}-{story}-{name}.md`.
+Register di `DependencyInjection.AddInfrastructure()`, swap dari `MifxBrokerService` ke implementasi baru, atau gate via feature flag.
+
+Folder existing untuk reference: `src/ForexAI.Infrastructure/Services/Deriv/` dan `Services/Exness/` (tidak aktif di DI default).
+
+---
+
+## Debugging Tips
+
+### EA tidak push data ke API
+
+- Cek MT5 **Experts** log tab — error WebRequest biasanya soal allowed URL whitelist
+- Cek `data/demo/audit-log.jsonl` untuk lihat event terakhir yang ter-log
+- `GET /api/mifx-bridge/health` — return last tick timestamp; kalau > 1 menit, EA disconnect
+
+### Signal analysis return 503
+
+`InvalidOperationException` artinya EA belum push tick/candle pertama. Tunggu EA on-bar handler trigger (max 1 candle M15 = 15 menit), atau pakai `BacktestRunner` untuk replay history.
+
+### Frontend tidak terima SignalR push
+
+- CORS — pastikan port frontend di `Program.cs` CORS whitelist (saat ini: 3000, 3001)
+- SignalR hub URL: `http://localhost:8080/hub/dashboard`
+- Network tab: cek negotiate handshake 200
+
+### Test failing dengan DirectoryNotFoundException
+
+Test factory butuh content root absolut. Pastikan `ForexApiFactory.FindProjectRoot()` ketemu folder `data/`. Kalau project di-rename, update path matching di `FindProjectRoot()`.
 
 ---
 
 ## Risk Management — Hard Limits
 
-These limits are enforced in `ExecuteTradeHandler` and `RuleBasedRiskEvaluator`. **Never bypass them.**
+Enforced di [`RuleBasedRiskEvaluator`](../src/ForexAI.Infrastructure/Services/RuleBasedRiskEvaluator.cs) dan `ExecuteTradeHandler`. **Jangan bypass.**
 
 | Invariant | Value |
-|-----------|-------|
-| Risk per trade | **1%** of equity |
-| Max drawdown | **10%** → system STOP |
+|---|---|
+| Risk per trade | **1%** equity (Nano tier ada $ cap tambahan) |
+| Max drawdown | **10%** → sistem auto-STOP |
 | Max open positions | **3** |
-| Min AI confidence | **60%** |
+| Min AI confidence | **60** |
+| Max trade/hari | **7** |
 
----
-
-## Simulation Mode
-
-All trades run with `mode: "SIMULATION"` until MT5 or OANDA integration is complete. Trade IDs use prefix `SIM-{date}-{seq}`. Live mode will use `LIVE-` prefix.
-
-See [pipeline.md](pipeline.md) for the full execution flow and [architecture.md](architecture.md) for layer responsibilities.
+Lihat [pipeline.md](pipeline.md) untuk flow detail dan [architecture.md](architecture.md) untuk layer responsibilities.

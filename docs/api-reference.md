@@ -1,17 +1,19 @@
 # API Reference
 
-Base URL (development): `http://localhost:5000`  
-Swagger UI: `http://localhost:5000/swagger`
+Base URL (development): `http://localhost:8080`
+Swagger UI: `http://localhost:8080/swagger`
 
-All requests and responses use **camelCase JSON**. Enum values are serialized as **strings** (e.g., `"BUY"`, `"ACTIVE"`).
+Semua request/response **camelCase JSON**. Enum di-serialize sebagai **string** (e.g. `"BUY"`, `"ACTIVE"`).
+
+**Sumber data:** MT5 MIFX Expert Advisor (push tick + candle + position report). Tanpa EA running, endpoint signal/market akan return 503 (`InvalidOperationException: EA not connected`).
 
 ---
 
-## Endpoints
+## Signal Analysis
 
 ### POST /api/signal/analyze
 
-Analyze market conditions and generate a trade signal.
+Generate sinyal dari live market data.
 
 **Request**
 ```json
@@ -25,7 +27,6 @@ Analyze market conditions and generate a trade signal.
 ```json
 {
   "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "runId": "run-20260510-001",
   "pair": "EUR/USD",
   "timeframe": "M15",
   "signal": "BUY",
@@ -33,31 +34,40 @@ Analyze market conditions and generate a trade signal.
   "confidenceScore": 0.69,
   "snapshot": {
     "pair": "EUR/USD",
-    "currentPrice": 1.1268,
-    "ma20M15": 1.1251,
-    "ma50M15": 1.1230,
+    "currentPrice": 1.0850,
+    "ma20M15": 1.0840,
+    "ma50M15": 1.0820,
+    "ma20H1": 1.0830,
+    "ma50H1": 1.0800,
     "rsi14": 58.4,
     "rsiDirection": "rising",
-    "session": "London"
+    "session": "LONDON",
+    "atr14": 0.0008,
+    "adx14": 28,
+    "regime": "Trending"
   },
   "trendAnalysis": { "bias": "BULLISH", "strength": "STRONG", "score": 0.78, "htfAligned": true },
   "momentumAnalysis": { "rsiValue": 58.4, "rsiDirection": "rising", "zone": "NEUTRAL", "score": 0.65 },
-  "structureAnalysis": { "nearestSupport": "1.1240-1.1250", "score": 0.70, "candleConfirmed": true },
+  "structureAnalysis": { "nearestSupport": "1.0820-1.0830", "score": 0.70 },
   "tradeParameters": {
-    "entry": 1.1268, "stopLoss": 1.1244, "stopLossPips": 24,
-    "takeProfit": 1.1313, "takeProfitPips": 45,
-    "lotSize": 0.41, "riskAmount": 100.0, "potentialProfit": 187.5, "riskRewardRatio": 1.87
+    "entry": 1.0850, "stopLoss": 1.0830, "stopLossPips": 20,
+    "takeProfit": 1.0880, "takeProfitPips": 30,
+    "lotSize": 0.41, "riskAmount": 100.0, "potentialProfit": 150.0, "riskRewardRatio": 1.50
   },
-  "timestamp": "2026-05-10T14:09:05+00:00",
+  "timestamp": "2026-05-16T14:09:05+00:00",
   "warnings": []
 }
 ```
 
+**Response 503** — EA belum push tick pertama atau di-disconnect.
+
 ---
+
+## Risk Evaluation
 
 ### POST /api/risk/evaluate
 
-Evaluate risk for a signal using a predictor result.
+Evaluate signal terhadap hard risk invariants.
 
 **Request**
 ```json
@@ -79,30 +89,34 @@ Evaluate risk for a signal using a predictor result.
   "positionDecision": "OPEN",
   "isGo": true,
   "validatedParameters": {
-    "entry": 1.1268, "stopLoss": 1.1244, "stopLossPips": 24,
-    "takeProfit": 1.1313, "takeProfitPips": 45,
-    "lotSize": 0.41, "riskAmount": 100.0, "potentialProfit": 187.5, "riskRewardRatio": 1.87
+    "entry": 1.0850, "stopLoss": 1.0830, "stopLossPips": 20,
+    "takeProfit": 1.0880, "takeProfitPips": 30,
+    "lotSize": 0.41, "riskAmount": 100.0, "potentialProfit": 150.0, "riskRewardRatio": 1.50
   },
   "cautionNotes": ["Confidence 69% — above minimum but below strong threshold of 70%"],
   "noGoReasons": []
 }
 ```
 
-**Risk gate logic (in order):**
+**Decision logic (in order):**
 
 | Condition | Decision |
-|-----------|----------|
-| `signal == HOLD` | `NO-GO` |
-| `adjustedConfidence < 0.60` | `NO-GO` |
-| `openPositions >= 3` | `NO-GO` |
+|---|---|
+| `signal == HOLD` | `NO_GO` |
+| `adjustedConfidence < 0.60` | `NO_GO` |
+| `openPositions >= 3` | `NO_GO` |
+| `drawdown >= 10%` | `NO_GO` (system STOP) |
+| `dailyTradeCount >= 7` | `NO_GO` |
 | `adjustedConfidence < 0.70` | `GO_WITH_CAUTION` |
 | otherwise | `GO` |
 
 ---
 
+## Trade Execution
+
 ### POST /api/trade/execute
 
-Execute a trade given a risk validation result.
+Execute trade berdasarkan risk validation. Kalau `Mifx:EnableExecution = true`, kirim order ke EA. Kalau false, simulate.
 
 **Request**
 ```json
@@ -125,51 +139,160 @@ Execute a trade given a risk validation result.
 **Response 200**
 ```json
 {
-  "tradeId": "SIM-20260510-140905",
-  "runId": "run-20260510-001",
+  "tradeId": "SIM-20260516-140905",
   "status": "ACTIVE",
   "pair": "EUR/USD",
   "direction": "BUY",
-  "entry": 1.1268,
-  "stopLoss": 1.1244,
-  "takeProfit": 1.1313,
+  "entry": 1.0850,
+  "stopLoss": 1.0830,
+  "takeProfit": 1.0880,
   "lotSize": 0.41,
   "riskAmount": 100.0,
-  "potentialProfit": 187.5,
-  "riskReward": 1.87,
   "floatingPnl": 0.0,
-  "floatingPnlPips": 0,
-  "openedAt": "2026-05-10T14:09:05+00:00",
+  "openedAt": "2026-05-16T14:09:05+00:00",
   "closedAt": null,
   "mode": "SIMULATION"
 }
 ```
 
-**Hard limits enforced before execution:**
+**Final guards (sebelum kirim order):**
 
-| Limit | Value | Action |
-|-------|-------|--------|
-| Risk per trade | max **1%** equity | Reject if `riskAmount > equity * 0.01` |
-| Max drawdown | **10%** | Reject if `currentEquity < peakEquity * 0.90` |
-| Max open positions | **3** | Reject if `countOpen >= 3` |
-| AI confidence | min **60%** | Rejected at risk gate, but double-checked |
-| Risk decision | must be `GO` or `GO_WITH_CAUTION` | Reject if `NO-GO` |
+| Limit | Action |
+|---|---|
+| `riskAmount > equity * 0.01` | Reject |
+| `currentEquity < peakEquity * 0.90` | Reject (DD STOP) |
+| `countOpen >= 3` | Reject |
+| Decision `NO_GO` | Reject |
+| `SystemStateService.IsHalted` | Reject |
+
+Hard-fail → `TradePosition` dengan `status: SKIPPED` + `skipReason`.
 
 ---
 
+## Positions
+
+### GET /api/position
+
+List semua posisi (`ACTIVE` + closed). Query param `status` untuk filter.
+
 ### GET /api/position/{pair}
 
-Get the active position for a currency pair.
+Active position untuk pair tertentu. `pair` boleh `EURUSD` atau `EUR/USD`.
 
-**Parameters**
+**Response 200** — `TradePosition` shape sama dengan execute response.
+**Response 204** — no active position.
 
-| Name | In | Description |
-|------|----|-------------|
-| `pair` | path | Pair identifier — `EURUSD` or `EUR/USD` (normalized) |
+### POST /api/position/{tradeId}/close
 
-**Response 200** — returns same `TradePosition` shape as execute endpoint.
+Close position via broker (atau simulasi).
 
-**Response 204** — no active position for this pair.
+**Request**
+```json
+{ "outcome": "WIN", "exitPrice": 1.0880 }
+```
+
+**Response 200** — `TradePosition` dengan `status: CLOSED_WIN` atau `CLOSED_LOSS`, `closedAt`, `realizedPnl`.
+
+---
+
+## Account
+
+### GET /api/account
+
+**Response 200**
+```json
+{
+  "balance": 10000.00,
+  "equity": 10125.50,
+  "peakEquity": 10200.00,
+  "drawdownPct": 0.73,
+  "openPositions": 1,
+  "mode": "DEMO",
+  "isHalted": false
+}
+```
+
+---
+
+## Backtest
+
+### POST /api/backtest/run
+
+Replay signal-history.json untuk evaluate strategy changes.
+
+**Request**
+```json
+{ "from": "2026-04-01", "to": "2026-05-01" }
+```
+
+**Response 200** — summary statistics (winrate, total trades, expectancy, max DD, profit factor).
+
+---
+
+## Audit
+
+### GET /api/audit?limit=100
+
+Tail audit log dari `data/{mode}/audit-log.jsonl`.
+
+**Response 200** — array of audit events (newest first).
+
+---
+
+## EA Deploy
+
+### POST /api/ea/deploy
+
+Copy + compile MQL5 EA ke MT5 terminal folder.
+
+**Response 200**
+```json
+{ "deployed": true, "terminalPath": "/Users/.../Terminal/<hash>", "compiled": true }
+```
+
+---
+
+## System
+
+### GET /api/system/status
+
+```json
+{
+  "isHalted": false,
+  "haltReason": null,
+  "lastEaTick": "2026-05-16T14:09:00+00:00",
+  "uptime": "PT2H15M",
+  "version": "1.18"
+}
+```
+
+---
+
+## Market
+
+### GET /api/market/snapshot?pair=EURUSD&timeframe=M15
+
+Current `MarketSnapshot` (bypass signal analysis — raw indicators only).
+
+---
+
+## MIFX Bridge (EA inbound)
+
+`POST /api/mifx-bridge/tick`, `/api/mifx-bridge/candle`, `/api/mifx-bridge/position`, `/api/mifx-bridge/account` — endpoint yang di-call dari MT5 EA. Payload contract di [mql5/ForexAI_Bridge.mq5](../mql5/ForexAI_Bridge.mq5).
+
+---
+
+## SignalR
+
+Hub: `ws://localhost:8080/hub/dashboard` (atau https + wss kalau dideploy).
+
+**Server → client events:**
+- `PositionUpdate` — payload `TradePosition`
+- `SignalGenerated` — payload `TradeSignal`
+- `AccountUpdate` — payload account snapshot
+- `SystemStateChanged` — payload `{isHalted, reason}`
+
+Frontend pakai `@microsoft/signalr` client (lihat [frontend/src/lib/](../frontend/src/lib/)).
 
 ---
 
@@ -184,31 +307,9 @@ Get the active position for a currency pair.
 }
 ```
 
-**500 Internal Server Error**
+**500 Internal Server Error / 503 Service Unavailable**
 ```json
-{
-  "error": "An unexpected error occurred"
-}
+{ "error": "EA not connected" }
 ```
 
-> Stack traces are never exposed in responses.
-
----
-
-## Running the API
-
-```bash
-dotnet run --project src/ForexAI.API
-# → http://localhost:5000/swagger
-```
-
-### Prerequisites
-
-Stub services read from BMAD planning artifact files. These must exist before the API starts:
-
-```
-_bmad-output/planning-artifacts/signal-output.json
-_bmad-output/planning-artifacts/risk-decision.json
-```
-
-Run `/forex-market-analysis-signal` and `/forex-risk-management-gate` BMAD skills to generate them.
+503 untuk known domain error (`InvalidOperationException` — biasanya EA disconnect). 500 untuk unexpected. Stack trace tidak pernah ke-expose.

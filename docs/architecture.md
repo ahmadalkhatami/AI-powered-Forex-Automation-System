@@ -2,44 +2,67 @@
 
 ## Overview
 
-The AI-powered Forex Automation System is a semi-automated, simulation-first trading platform targeting EUR/USD on M15/H1 timeframes. The backend is implemented in **C# .NET 8** following **Clean Architecture** principles. It coordinates a multi-stage pipeline: market signal analysis → AI-backed prediction validation → risk management gate → trade execution (simulation or live).
+Semi-automated EUR/USD trading platform untuk timeframe M15/H1. Backend **C# .NET 8 Clean Architecture**, frontend **Next.js**, eksekusi via **MIFX MT5 Expert Advisor bridge**.
 
-The system is deliberately in **simulation phase** during initial development. All infrastructure adapters either read from pre-generated BMAD planning artifact JSON files or persist state to local JSON files, enabling full end-to-end testing without a live broker connection.
+Sumber data: tick + candle (M15/H1/D1) di-push real-time dari MT5 EA ke API. Sinyal di-generate sepenuhnya di code path (`LiveSignalAnalyzer`) — tidak ada dependency external pipeline.
+
+Default state: **simulation** (file `data/mode-state.json`, mode auto-detect dari EA `AccountInfoString`).
 
 ---
 
 ## Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        ForexAI.API                                  │
-│   SignalController  RiskController  TradeController  PositionCtrl   │
-│   Program.cs  (CORS, Swagger dev-only, Global Exception Handler)    │
-└────────────────────────────┬────────────────────────────────────────┘
-                             │  HTTP requests → MediatR commands/queries
+                            ┌─────────────────────┐
+                            │  MT5 (MetaTrader 5) │
+                            │  + MIFX EA bridge    │
+                            └──┬──────────┬───────┘
+                               │          │
+                  tick/candle  │          │  order/close commands
+                  account info ▼          ▲
+┌──────────────────────────────────────────────────────────────────┐
+│                          ForexAI.API                              │
+│   MifxBridgeController (EA inbound) ── MifxCommandQueue (out)     │
+│   SignalController, RiskController, TradeController, ...          │
+│   DashboardHub (SignalR push ke frontend)                         │
+└────────────────────────────┬───────────────────────────────────┘
+                             │  injected interfaces
                              ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                     ForexAI.Application                             │
-│   Commands / Queries (CQRS via MediatR):                            │
-│     AnalyzeSignalCommand   EvaluateRiskCommand                      │
-│     ExecuteTradeCommand    GetPositionStatusQuery                   │
-│   Handlers orchestrate domain logic via interfaces                  │
-└──────────┬──────────────────────────────────────────┬──────────────┘
-           │  depends on (abstractions only)           │
-           ▼                                           ▼
-┌─────────────────────────┐           ┌───────────────────────────────┐
-│     ForexAI.Domain      │           │     ForexAI.Infrastructure    │
-│                         │◄──────────│                               │
-│  Entities               │ implements│  JsonSignalRepository         │
-│  Value Objects          │           │  JsonTradePositionRepository  │
-│  Interfaces             │           │  StubMarketDataService        │
-│  Enums                  │           │  BmadSignalAnalyzer           │
-│                         │           │  RuleBasedRiskEvaluator       │
-└─────────────────────────┘           └───────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                       ForexAI.Application                        │
+│   UseCases: AnalyzeSignal, EvaluateRisk, ExecuteTrade,           │
+│             ClosePosition, GetAccountHealth,                     │
+│             GetPositionStatus, GetAllPositions                   │
+└────────┬─────────────────────────────────────────┬───────────────┘
+         │  abstractions only                       │
+         ▼                                          ▼
+┌─────────────────────────┐          ┌─────────────────────────────┐
+│     ForexAI.Domain      │          │    ForexAI.Infrastructure   │
+│                         │◀─────────│                             │
+│  Entities:              │ implements│  Services/                 │
+│   TradeSignal           │           │   LiveSignalAnalyzer       │
+│   TradePosition         │           │   RuleBasedRiskEvaluator   │
+│                         │           │   BacktestRunner           │
+│  Value Objects:         │           │   EaDeployService          │
+│   MarketSnapshot        │           │   AuditLogger              │
+│   CandleBar             │           │  Mifx/                     │
+│   ...                   │           │   MifxFullDataService      │
+│                         │           │   MifxCandleDataService    │
+│  Interfaces:            │           │   MifxBrokerService        │
+│   ISignalAnalyzer       │           │   MifxCommandQueue         │
+│   IRiskEvaluator        │           │   MifxPositionSyncService  │
+│   IMarketDataService    │           │   MifxCandleFeed           │
+│   ICandleDataService    │           │   MifxPriceFeed            │
+│   IBrokerService        │           │  Persistence/Repositories/ │
+│   IModeService          │           │   JsonSignalRepository     │
+│   ISystemStateService   │           │   JsonTradePositionRepo    │
+│   I*Repository          │           │  Broker/                   │
+│                         │           │   NullBrokerService        │
+└─────────────────────────┘           └─────────────────────────────┘
 
 Dependency rule: arrows point INWARD.
 Domain has zero external dependencies.
-Infrastructure depends on Domain; API depends on Application + Infrastructure (for DI wiring only).
+Infrastructure depends on Domain. API depends on Application + Infrastructure (DI only).
 ```
 
 ---
@@ -48,252 +71,193 @@ Infrastructure depends on Domain; API depends on Application + Infrastructure (f
 
 ### 1. ForexAI.Domain
 
-The innermost layer. Contains all business concepts with no framework or I/O dependencies — pure C#.
-
-**Responsibilities**
-- Define the core vocabulary of the trading domain.
-- Express business invariants and rules as first-class types.
-- Declare contracts (interfaces) that outer layers must satisfy.
+Innermost layer. Pure C#, zero IO/framework deps.
 
 **Entities**
 
 | Type | Description |
 |---|---|
-| `TradeSignal` | Represents a market signal with direction, confidence score, and embedded analysis results. Owns a `PredictorResult` and `RiskValidation` once the pipeline stages complete. |
-| `TradePosition` | Represents an open or closed trade position. Carries entry/exit prices, lot size, P&L, and lifecycle status via `TradeStatus`. |
+| `TradeSignal` | Sinyal pasar dengan direction, confidence, embedded analysis. Carry `RiskValidation` setelah lewat risk gate. |
+| `TradePosition` | Posisi open/closed: entry, exit, lot, P&L, status. |
 
-**Value Objects**
+**Value Objects (selected)**
 
 | Type | Description |
 |---|---|
-| `MarketSnapshot` | Immutable snapshot of current price, spread, and session data used as pipeline input. |
-| `TrendAnalysis` | Encapsulates Moving Average crossover results (MA20/MA50/MA200 alignment, trend direction). |
-| `MomentumAnalysis` | Encapsulates RSI reading, overbought/oversold state, and momentum direction. |
-| `StructureAnalysis` | Encapsulates Support/Resistance levels, proximity to key levels, and structural bias. |
-| `TradeParameters` | Immutable specification for a trade: direction, lot size, entry price, stop-loss, take-profit. |
-| `PredictorResult` | Output from the AI predictor stage: confidence score (0–100) and validation narrative. |
-| `RiskValidation` | Output from the risk gate: `PositionDecision` (GO / NO_GO / GO_WITH_CAUTION), adjusted lot size, rejection reason if applicable. |
+| `MarketSnapshot` | Snapshot harga, MA20/50 (M15+H1+D1), RSI, S/R zone, session, ATR(14), ADX(14), regime tag. |
+| `CandleBar` | OHLCV bar dari EA. |
+| `TradeParameters` | Spec trade: direction, lot, entry, SL, TP. |
+| `RiskValidation` | Output risk gate: `PositionDecision` (GO / NO_GO / GO_WITH_CAUTION), adjusted lot, rejection reason. |
 
-**Interfaces**
+**Interfaces (di [src/ForexAI.Domain/Interfaces/](../src/ForexAI.Domain/Interfaces/))**
 
 | Interface | Role |
 |---|---|
-| `ISignalAnalyzer` | Contract for analyzing market data and producing a `TradeSignal`. |
-| `IRiskEvaluator` | Contract for evaluating a signal against risk rules and returning a `RiskValidation`. |
-| `IMarketDataService` | Contract for retrieving the current `MarketSnapshot`. |
-| `ISignalRepository` | Contract for persisting and retrieving `TradeSignal` records. |
-| `ITradePositionRepository` | Contract for persisting and retrieving `TradePosition` records. |
-
-**Enums**
-
-| Enum | Values |
-|---|---|
-| `SignalDirection` | `BUY`, `SELL`, `HOLD` |
-| `TradeStatus` | `Pending`, `Open`, `Closed`, `Cancelled` |
-| `PositionDecision` | `GO`, `NO_GO`, `GO_WITH_CAUTION` |
+| `ISignalAnalyzer` | Generate `TradeSignal` dari market data. |
+| `IRiskEvaluator` | Apply risk rules → `RiskValidation`. |
+| `IMarketDataService` | Fetch `MarketSnapshot` (current pair/TF). |
+| `ICandleDataService` | Fetch historical candles untuk SMA D1 / regime detection. |
+| `IBrokerService` | Send order/close ke broker. |
+| `IModeService` | Demo vs Real mode tracking + change event. |
+| `ISystemStateService` | Cross-cutting state: peak equity, STOP flag, daily counters. |
+| `ITradePositionRepository`, `ISignalRepository` | Persistence contracts. |
 
 ---
 
 ### 2. ForexAI.Application
 
-The orchestration layer. References only Domain abstractions — never infrastructure types directly.
+Orchestration layer. Reference Domain abstraction saja, never Infrastructure types.
 
-**Responsibilities**
-- Define CQRS commands and queries.
-- Implement MediatR handlers that wire together domain interfaces.
-- Enforce pipeline sequencing: signal → predictor validation → risk gate → execution.
-- Return structured result DTOs to the API layer.
+Use cases live di [src/ForexAI.Application/UseCases/](../src/ForexAI.Application/UseCases/) — satu folder per use case (handler + request/response). Saat ini tidak pakai MediatR — handler di-resolve langsung via DI.
 
-**Use Cases (Commands & Queries)**
-
-| Name | Type | Description |
-|---|---|---|
-| `AnalyzeSignalCommand` | Command | Requests a full market analysis. The handler calls `IMarketDataService` to fetch a snapshot, then `ISignalAnalyzer` to produce a `TradeSignal`, then persists via `ISignalRepository`. Returns the signal DTO including embedded `TrendAnalysis`, `MomentumAnalysis`, and `StructureAnalysis`. |
-| `EvaluateRiskCommand` | Command | Takes a `TradeSignal` ID, loads it via `ISignalRepository`, calls `IRiskEvaluator`, attaches the resulting `RiskValidation` to the signal, and re-persists. Returns the `PositionDecision` and lot-sizing output. |
-| `ExecuteTradeCommand` | Command | Takes a validated `TradeSignal` (must have a GO or GO_WITH_CAUTION decision). Constructs `TradeParameters`, creates a `TradePosition` entity, and persists via `ITradePositionRepository`. In simulation phase this is a dry-run; no broker call occurs. |
-| `GetPositionStatusQuery` | Query | Returns a snapshot of all active `TradePosition` records from `ITradePositionRepository`. Supports filtering by `TradeStatus`. |
-
-**Handler Pattern**
-
-Each handler follows the same structure:
-1. Validate command/query inputs.
-2. Load domain state from repository interfaces.
-3. Invoke domain logic (pure) or delegate to service interfaces.
-4. Persist updated state.
-5. Map domain objects to response DTOs and return.
-
-No handler contains business logic — all rules live in Domain or in the implementing infrastructure adapters.
+| Use Case | Role |
+|---|---|
+| `AnalyzeSignal` | Call `IMarketDataService` + `ICandleDataService` → invoke `ISignalAnalyzer` → persist via `ISignalRepository`. |
+| `EvaluateRisk` | Load signal, invoke `IRiskEvaluator`, persist updated signal dengan `RiskValidation`. |
+| `ExecuteTrade` | Construct `TradeParameters`, create `TradePosition`, call `IBrokerService` (atau simulasi), persist. |
+| `ClosePosition` | Close position via broker, update `TradePosition` ke `CLOSED_WIN`/`CLOSED_LOSS`. |
+| `GetPositionStatus` | Query posisi by pair atau ID. |
+| `GetAllPositions` | List semua posisi (filter by status). |
+| `GetAccountHealth` | Equity, balance, peak equity, drawdown %. |
 
 ---
 
 ### 3. ForexAI.Infrastructure
 
-The adapter layer. Provides concrete implementations of every interface declared in Domain. This is the only layer that performs I/O (file reads, JSON parsing).
+Adapter layer. Implementasi konkret untuk semua interface Domain. Layer ini yang melakukan IO.
 
-**Responsibilities**
-- Implement Domain interfaces with real (or stub) I/O adapters.
-- Own all serialization/deserialization concerns (System.Text.Json).
-- Integrate with external data sources (BMAD planning artifacts, future broker APIs).
-- Remain swappable: any adapter can be replaced without touching Domain or Application.
+**Services**
 
-**Implementations**
-
-#### `JsonSignalRepository`
-Implements `ISignalRepository`. Persists `TradeSignal` entities as JSON to `_bmad-output/planning-artifacts/signal-output.json`. Uses append-or-overwrite semantics suitable for single-session simulation runs.
-
-#### `JsonTradePositionRepository`
-Implements `ITradePositionRepository`. Persists `TradePosition` entities to `_bmad-output/implementation-artifacts/execution-log.json`. Reads the full array on every query and writes it back atomically on every mutation. Acceptable at simulation scale.
-
-#### `StubMarketDataService`
-Implements `IMarketDataService`. Rather than calling a live broker, reads the current `MarketSnapshot` from `_bmad-output/planning-artifacts/signal-output.json` — the artifact produced by the BMAD forex pipeline. Allows end-to-end testing with realistic market data without any API credentials.
-
-#### `BmadSignalAnalyzer`
-Implements `ISignalAnalyzer`. Reads the pre-computed analysis from two BMAD artifacts:
-- `signal-output.json` — provides `TrendAnalysis`, `MomentumAnalysis`, `StructureAnalysis`, and initial `SignalDirection`.
-- `risk-decision.json` — provides the predictor confidence and `PositionDecision` context.
-
-Hydrates and returns a fully-formed `TradeSignal` entity, effectively bridging the BMAD agent pipeline output into the .NET domain model.
-
-#### `RuleBasedRiskEvaluator`
-Implements `IRiskEvaluator`. Pure logic adapter — no I/O. Applies the system's hard risk invariants:
-
-| Rule | Value |
+| File | Role |
 |---|---|
-| Risk per trade | 1% of account equity |
-| Minimum predictor confidence for GO | 60 |
-| Maximum open positions | 3 |
-| Maximum drawdown before system STOP | 10% |
+| [LiveSignalAnalyzer.cs](../src/ForexAI.Infrastructure/Services/LiveSignalAnalyzer.cs) | `ISignalAnalyzer` aktual. Hitung MA crossover (M15+H1), RSI(14), proximitas ke S/R zone, ATR-based dynamic SL/TP, ADX trend strength, regime classification, HTF D1 alignment veto. Output sinyal + confidence 0–100. |
+| [RuleBasedRiskEvaluator.cs](../src/ForexAI.Infrastructure/Services/RuleBasedRiskEvaluator.cs) | `IRiskEvaluator`. Enforce risk invariant (1% per trade, max DD 10%, max 3 posisi, min confidence 60). Output `PositionDecision` + adjusted lot. |
+| [BacktestRunner.cs](../src/ForexAI.Infrastructure/Services/BacktestRunner.cs) | Replay `signal-history.json` untuk evaluate strategi changes. |
+| [EaDeployService.cs](../src/ForexAI.Infrastructure/Services/EaDeployService.cs) | Copy + compile MQL5 EA ke MT5 terminal folder. |
+| [TechnicalIndicators.cs](../src/ForexAI.Infrastructure/Services/TechnicalIndicators.cs) | Pure helper untuk MA/RSI/ATR/ADX (dipakai LiveSignalAnalyzer + BacktestRunner). |
 
-Returns a `RiskValidation` value object with the computed `PositionDecision`, adjusted lot size (Kelly-fraction capped at 1% risk), and a rejection reason string when NO_GO is issued.
+**Mifx bridge** (di [src/ForexAI.Infrastructure/Mifx/](../src/ForexAI.Infrastructure/Mifx/))
+
+| Component | Role |
+|---|---|
+| `MifxPriceFeed` | Singleton in-memory current tick (last bid/ask + MA/RSI/S-R yang di-push EA). |
+| `MifxCandleFeed` | Singleton cache candle M15/H1/D1 dari EA push. |
+| `MifxCommandQueue` | Outbound command queue (order/close) yang di-poll EA. |
+| `MifxFullDataService` | `IMarketDataService` impl — gabungkan tick + computed indicators jadi `MarketSnapshot`. |
+| `MifxCandleDataService` | `ICandleDataService` impl — return cached candle dari `MifxCandleFeed`. |
+| `MifxBrokerService` | `IBrokerService` impl — enqueue order ke `MifxCommandQueue`, await EA confirmation. |
+| `MifxPositionSyncService` | Listen EA position report, sync ke `JsonTradePositionRepository`. |
+
+**Persistence** (di [src/ForexAI.Infrastructure/Persistence/Repositories/](../src/ForexAI.Infrastructure/Persistence/Repositories/))
+
+`JsonSignalRepository` dan `JsonTradePositionRepository` — file-backed di `data/{mode}/`. Atomic write via temp file + rename.
+
+**Alternative broker adapters** (tidak aktif di default DI — sisa eksplorasi awal)
+
+- `Services/Deriv/` — Deriv WebSocket client
+- `Services/Exness/` — Exness Local MT5 + MetaAPI HTTP
+- `Broker/NullBrokerService.cs` — no-op fallback ketika `Mifx:EnableExecution = false`
 
 ---
 
 ### 4. ForexAI.API
 
-The entry point layer. Hosts the HTTP API, configures the DI container, and translates HTTP contracts to MediatR dispatches.
+HTTP entry point. ASP.NET Core 8, Kestrel di `http://localhost:8080`.
 
-**Responsibilities**
-- Register all services, repositories, and handlers in `Program.cs`.
-- Route HTTP requests to the appropriate MediatR command or query.
-- Apply cross-cutting concerns: CORS, Swagger (dev only), global exception handling.
-- Return consistent HTTP response shapes.
+**Controllers** ([src/ForexAI.API/Controllers/](../src/ForexAI.API/Controllers/))
 
-**Controllers**
+| Controller | Purpose |
+|---|---|
+| `SignalController` | `POST /api/signal/analyze` — generate sinyal |
+| `RiskController` | `POST /api/risk/evaluate` — risk gate |
+| `TradeController` | `POST /api/trade/execute` |
+| `PositionController` | List/get/close posisi |
+| `AccountController` | Account health snapshot |
+| `MarketController` | Current market data |
+| `AuditController` | Tail audit log |
+| `BacktestController` | Jalankan replay backtest |
+| `EaController` | Deploy / compile EA |
+| `SystemController` | System status, STOP flag |
+| `MifxBridgeController` | EA inbound: tick, candle, position report |
+| `Mt5BridgeController` | Legacy Exness MT5 bridge endpoint |
 
-| Controller | Endpoints | Dispatches |
-|---|---|---|
-| `SignalController` | `POST /api/signals/analyze` | `AnalyzeSignalCommand` |
-| `RiskController` | `POST /api/risk/evaluate` | `EvaluateRiskCommand` |
-| `TradeController` | `POST /api/trades/execute` | `ExecuteTradeCommand` |
-| `PositionController` | `GET /api/positions` | `GetPositionStatusQuery` |
+**SignalR Hub** ([src/ForexAI.API/Hubs/DashboardHub.cs](../src/ForexAI.API/Hubs/DashboardHub.cs)) — `/hub/dashboard`. Push event real-time ke frontend (live PnL, position updates, signal events).
 
-**Program.cs Configuration**
-
-```
-Services registered:
-  - MediatR (scans ForexAI.Application assembly)
-  - ISignalAnalyzer        → BmadSignalAnalyzer
-  - IRiskEvaluator         → RuleBasedRiskEvaluator
-  - IMarketDataService     → StubMarketDataService
-  - ISignalRepository      → JsonSignalRepository
-  - ITradePositionRepository → JsonTradePositionRepository
-
-Middleware pipeline (in order):
-  1. Global Exception Handler (maps domain exceptions to RFC 7807 ProblemDetails)
-  2. CORS (permissive in development, restricted by origin in production)
-  3. Swagger / SwaggerUI — only registered when ASPNETCORE_ENVIRONMENT == Development
-  4. Authentication / Authorization (placeholder, ready for JWT expansion)
-  5. Controllers
-```
+**Program.cs** registers:
+- Controllers + SignalR (CamelCase JSON, string enum)
+- CORS (origin: `http://localhost:3000` dan `:3001`, `AllowCredentials`)
+- Swagger (dev only)
+- Global exception handler (`InvalidOperationException` → 503, lainnya → 500)
+- DI via `AddApplication()` + `AddInfrastructure(configuration)`
 
 ---
 
-## Dependency Flow
+## Configuration
 
-```
-HTTP Request
-     │
-     ▼
-ForexAI.API (Controller)
-     │
-     │  IMediator.Send(command)
-     ▼
-ForexAI.Application (Handler)
-     │
-     │  calls interfaces: ISignalAnalyzer, IRiskEvaluator,
-     │  IMarketDataService, ISignalRepository, ITradePositionRepository
-     ▼
-ForexAI.Domain (Entities, Value Objects, Interfaces)
-     ▲
-     │  implements interfaces
-ForexAI.Infrastructure (Adapters)
-     │
-     │  reads/writes
-     ▼
-File System (_bmad-output/*.json)
+[src/ForexAI.API/appsettings.json](../src/ForexAI.API/appsettings.json):
+
+```json
+{
+  "Kestrel": {
+    "Endpoints": {
+      "Http8080": { "Url": "http://localhost:8080" },
+      "Http5033": { "Url": "http://127.0.0.1:5033" }
+    }
+  },
+  "Mifx": { "EnableExecution": true }
+}
 ```
 
-**Inward-only rule**: every `using` / project reference points toward Domain. Domain imports nothing outside the BCL.
-
----
-
-## Key Design Decisions
-
-### Why Clean Architecture?
-
-**Problem**: A trading system must support rapid iteration on business logic (signal strategies, risk rules) while also swapping infrastructure (simulation → live broker, JSON → database, stub analyzer → real ML model). Tightly coupled architectures make either change expensive.
-
-**Decision**: Clean Architecture enforces a hard boundary between what the system *does* (Domain + Application) and how it *does it* (Infrastructure). This means:
-- The `RuleBasedRiskEvaluator` can be replaced with an ML-based evaluator without touching a single command handler.
-- The `StubMarketDataService` can be swapped for an OANDA REST adapter by registering a different binding in `Program.cs`.
-- Domain logic can be unit-tested with zero mocking frameworks — just inject in-memory implementations of the interfaces.
-
-### Why CQRS with MediatR?
-
-**Problem**: As the pipeline grows (more signal types, additional risk checks, audit logging, notification hooks), a traditional service-layer approach causes handler classes to accumulate unrelated concerns and become difficult to test in isolation.
-
-**Decision**: CQRS via MediatR gives each use case a single, focused handler class. Benefits:
-
-- **Explicit intent**: `AnalyzeSignalCommand` vs `GetPositionStatusQuery` makes reads and writes structurally distinct.
-- **Extensibility via behaviors**: Cross-cutting concerns (logging, validation, performance timing) attach as `IPipelineBehavior<,>` decorators without modifying handlers.
-- **Testability**: Each handler is a plain class with constructor-injected interfaces. Unit tests instantiate the handler directly.
-- **Future event sourcing readiness**: Commands map naturally to domain events if an event store is introduced later.
-
-### Why JSON File Persistence for the Simulation Phase?
-
-**Problem**: During simulation, the system must bridge output from the BMAD agent pipeline (which produces JSON artifacts) into the .NET domain model. Introducing a database at this stage adds operational complexity without delivering value.
-
-**Decision**: JSON file persistence via `System.Text.Json` is sufficient because:
-
-- **Zero infrastructure cost**: No database server, migration scripts, or connection strings needed to run the system.
-- **BMAD artifact integration**: `StubMarketDataService` and `BmadSignalAnalyzer` read directly from `_bmad-output/planning-artifacts/`, treating BMAD agent outputs as the data source. This makes the .NET backend a consumer of the existing AI pipeline rather than duplicating it.
-- **Human-readable audit trail**: All signals and positions are inspectable without tooling — useful during early validation of trading logic.
-- **Replaceable at graduation**: Both repository implementations are behind `ISignalRepository` and `ITradePositionRepository`. Migrating to PostgreSQL, SQLite, or Cosmos DB is a matter of writing two new classes and changing two DI registrations.
-
-The tradeoff (no transactions, no concurrent write safety) is explicitly acceptable because simulation runs are single-session and single-user.
+`Mifx:EnableExecution = false` → `IBrokerService` resolve ke `NullBrokerService` (simulasi tanpa kirim order ke EA).
 
 ---
 
 ## Hard Risk Invariants
 
-These constraints are enforced by `RuleBasedRiskEvaluator` and are system-level invariants — no configuration or command can override them at runtime:
+Enforced di [`RuleBasedRiskEvaluator`](../src/ForexAI.Infrastructure/Services/RuleBasedRiskEvaluator.cs). System-level, tidak bisa di-override via API/config.
 
-| Constraint | Value | Consequence of breach |
+| Constraint | Value | Consequence |
 |---|---|---|
-| Risk per trade | 1% of equity | Lot size is adjusted down automatically |
-| Minimum predictor confidence | 60 / 100 | Automatic `NO_GO`, trade is not executed |
-| Maximum open positions | 3 | Automatic `NO_GO` until a position closes |
-| Maximum drawdown | 10% of account | System-wide STOP; `ExecuteTradeCommand` rejects all new trades |
+| Risk per trade | 1% equity | Lot size auto-adjust |
+| Min predictor confidence | 60 | Auto `NO_GO` |
+| Max open positions | 3 | Auto `NO_GO` sampai posisi close |
+| Max drawdown | 10% | System-wide STOP (`SystemStateService.IsHalted = true`) |
+| Auto-approve threshold | confidence ≥ 70% | Skip human approval |
+| Max trade/hari | 7 | Time-window throttle |
 
 ---
 
-## Future Extension Points
+## Key Design Decisions
 
-| Capability | Extension Approach |
+### Clean Architecture
+
+Memungkinkan swap adapter tanpa sentuh business logic. Contoh: pindah dari MIFX EA ke OANDA REST = bikin `OandaBrokerService : IBrokerService`, register di DI, selesai.
+
+### Use cases without MediatR
+
+Dipertimbangkan tapi tidak dipakai. Use case di-resolve langsung dari DI (constructor-injected ke controller atau service yang invoke). Lebih simpel untuk size project saat ini.
+
+### JSON file repository
+
+File-backed persistence cukup untuk simulation single-session. Trade-off: tidak ada concurrent write safety, no transactions — acceptable selama belum scale multi-user. Atomic write pakai temp file + `File.Move(overwrite: true)`.
+
+### Mode-aware storage
+
+`data/demo/` dan `data/real/` terpisah. `ModeService` auto-detect mode dari EA `AccountInfoString` push (REAL → `TradeMode.Real`, lain → `TradeMode.Demo`). Switch mode trigger event → repositories pivot folder target. `mode-state.json` persist di `data/` root (chicken-and-egg: lokasi mode-aware bergantung mode).
+
+### EA push, API pull-aware
+
+EA push tick/candle/position via REST. API tidak pull dari broker — semua state datang dari EA. Command keluar dari API ke EA via `MifxCommandQueue` yang di-poll EA.
+
+---
+
+## Extension Points
+
+| Capability | Approach |
 |---|---|
-| Live OANDA execution | Implement `IOandaTradeExecutor`, inject via DI, guard with feature flag |
-| MT5 bridge (Windows VM) | New Infrastructure adapter behind `ITradeExecutionBridge` |
-| Real-time ML predictor | Replace `BmadSignalAnalyzer` with `MlPredictorSignalAnalyzer` implementing `ISignalAnalyzer` |
-| Persistent database | Implement `EfCoreSignalRepository` and `EfCoreTradePositionRepository`; register in Program.cs |
-| WebSocket position feed | Add SignalR hub that publishes `GetPositionStatusQuery` results on a timer |
-| Audit / event log | Add `AuditLoggingBehavior : IPipelineBehavior<,>` — zero handler changes required |
+| OANDA / IB live execution | Implement `IBrokerService`, register di DI |
+| ML-based signal | Implement `ISignalAnalyzer` (replace `LiveSignalAnalyzer`) |
+| Database persistence | Implement `EfCore*Repository`, swap registration |
+| Real-time TradingView chart | Sudah ada via SignalR hub + frontend chart component |
+| Multi-pair | Loop di scheduler service, pass pair ke `IMarketDataService.GetSnapshotAsync(pair, tf)` |
+| Audit pipeline behavior | `AuditLogger` sudah ada — extend untuk cover use case lain |

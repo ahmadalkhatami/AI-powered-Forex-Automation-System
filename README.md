@@ -1,60 +1,70 @@
 # AI-powered Forex Automation System
 
-> Semi-automated EUR/USD trading system with AI signal analysis, rule-based risk management, and a human-approval dashboard. **Simulation-first** — no live capital at risk until you flip the switch.
+> Semi-automated EUR/USD trading system. Live MT5 data → rule-based signal analysis → risk gate → human-approval dashboard → broker execution via MIFX Expert Advisor.
 
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)
-![Build](https://img.shields.io/badge/build-passing-brightgreen)
-![Epic 1](https://img.shields.io/badge/Epic%201%20Backend-review-blue)
-![Mode](https://img.shields.io/badge/mode-SIMULATION-orange)
+![Next.js](https://img.shields.io/badge/Next.js-14-000?logo=nextdotjs)
+![MT5](https://img.shields.io/badge/MetaTrader-5-1A73E8)
+![Mode](https://img.shields.io/badge/default-SIMULATION-orange)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
 ## What it does
 
-The system runs a **5-stage pipeline** for every trade decision:
+5-stage pipeline untuk setiap trade decision:
 
 ```
-Market Analysis  →  AI Predictor  →  Risk Gate  →  Human Approval  →  Execution
-   (Farida 📈)      (Zara 🤖)       (Reza 🛡️)                       (Axis ⚡)
+Market Data  →  Signal Analysis  →  Risk Gate  →  Human Approval  →  Execution
+(MIFX EA)       (LiveSignalAnalyzer)  (RuleBased   (Dashboard)        (MIFX EA
+ tick+candle     MA/RSI/S-R + adaptive  Evaluator)                     order)
+                 mode + HTF D1 veto)
 ```
 
-1. **Farida** analyzes MA crossovers, RSI, and support/resistance on M15 + H1
-2. **Zara** validates the signal, scores confidence (0–100), flags concerns
-3. **Reza's risk gate** enforces hard limits (1% risk/trade, max 3 positions, min 60% confidence)
-4. **You** approve or reject via the React dashboard
-5. **Axis** executes the trade (simulation or live via OANDA/MT5)
+1. **MIFX EA** push live tick + candle (M15/H1/D1) + account info ke backend via REST.
+2. **LiveSignalAnalyzer** menghitung MA crossover, RSI, S/R zone, ATR/ADX regime — output sinyal BUY/SELL/HOLD + confidence 0–100.
+3. **RuleBasedRiskEvaluator** enforce invariant: 1% risk/trade, max DD 10%, max 3 posisi, min confidence 60.
+4. **Dashboard (Next.js)** menampilkan sinyal + risk decision; user approve/reject — atau auto-approve di confidence ≥ 70%.
+5. **MifxBrokerService** kirim order ke EA via command queue; EA eksekusi di MetaTrader 5.
+
+Default mode: **simulation**. Real money execution di-gate oleh `MifxSettings.EnableExecution` + auto-detection mode dari `AccountInfoString` (REAL vs DEMO).
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    React Dashboard (Epic 2–4)                 │
-│                    Next.js · TypeScript · Tailwind            │
-└────────────────────────┬─────────────────────────────────────┘
-                         │ HTTP / REST
-┌────────────────────────▼─────────────────────────────────────┐
-│                    ForexAI.API (.NET 8)                       │
-│   POST /signal/analyze  ·  POST /risk/evaluate                │
-│   POST /trade/execute   ·  GET  /position/{pair}              │
-└────────────────────────┬─────────────────────────────────────┘
-                         │ MediatR CQRS
-┌────────────────────────▼─────────────────────────────────────┐
-│                 ForexAI.Application                           │
-│   AnalyzeSignalHandler  ·  EvaluateRiskHandler                │
-│   ExecuteTradeHandler   ·  GetPositionStatusHandler           │
-└────────────┬──────────────────────────┬──────────────────────┘
-             │ Domain interfaces        │
-┌────────────▼────────────┐  ┌──────────▼──────────────────────┐
-│    ForexAI.Domain        │  │    ForexAI.Infrastructure        │
-│  Entities · ValueObjects │  │  JsonRepositories · Services     │
-│  Interfaces · Enums      │  │  BmadSignalAnalyzer              │
-└─────────────────────────┘  └──────────────────────────────────┘
+                  ┌───────────────────────────────┐
+                  │    ForexAI.API (port 8080)    │
+                  │  Controllers + SignalR Hub    │
+                  └───────────┬───────────────────┘
+                              │
+              ┌───────────────▼───────────────┐
+              │     ForexAI.Application       │
+              │  AnalyzeSignal · EvaluateRisk │
+              │  ExecuteTrade · ClosePosition │
+              │  GetAccountHealth · ...       │
+              └───────────────┬───────────────┘
+                              │
+              ┌───────────────▼─────────────────────────────┐
+              │           ForexAI.Domain                    │
+              │  TradePosition · TradeSignal · MarketSnap   │
+              │  ISignalAnalyzer · IRiskEvaluator · ...     │
+              └───────────────┬─────────────────────────────┘
+                              │
+              ┌───────────────▼─────────────────────────────┐
+              │       ForexAI.Infrastructure                │
+              │  LiveSignalAnalyzer · RuleBasedRiskEval     │
+              │  Mifx bridge (EA ⇄ API) · Json repos        │
+              │  BacktestRunner · EaDeployService           │
+              └─────────────────────────────────────────────┘
 ```
 
-Clean Architecture — dependency arrows point inward. Domain knows nothing about infrastructure.
+Clean Architecture — dependency arrows point inward. Domain pure, no IO/framework refs.
+
+Frontend (`frontend/`) adalah Next.js 14 dashboard di port 3000, terhubung ke API via REST + SignalR hub (`/hub/dashboard`).
+
+EA (`mql5/ForexAI_Bridge.mq5`) berjalan di MetaTrader 5 dan push data ke `/api/mifx-bridge/*`.
 
 ---
 
@@ -63,118 +73,78 @@ Clean Architecture — dependency arrows point inward. Domain knows nothing abou
 ### Prerequisites
 
 - [.NET 8 SDK](https://dotnet.microsoft.com/download)
-- Claude Code (for BMAD skill workflows)
+- [Node.js 20+](https://nodejs.org/)
+- MetaTrader 5 dengan MIFX account (Windows / wine) — _optional untuk simulasi_
 
-### Run the API
+### Run
 
 ```bash
 git clone <repo> && cd AI-powered-Forex-Automation-System
 
+# 1. Build solution
 dotnet build ForexAI.sln
+
+# 2. Start backend API → http://localhost:8080 (Swagger: /swagger)
 dotnet run --project src/ForexAI.API
 
-# Swagger UI → http://localhost:5000/swagger
+# 3. Start frontend → http://localhost:3000
+cd frontend && npm install && npm run dev
 ```
 
-The repo ships with pre-generated EUR/USD fixture data in `_bmad-output/planning-artifacts/` so the API works immediately — no live market connection needed.
-
-### Run Tests
+Tanpa MT5 EA running, signal analysis akan return error (`InvalidOperationException: EA not connected`). Untuk smoke test, jalankan integration test:
 
 ```bash
 dotnet test ForexAI.sln
 ```
 
-```
-Test Run Successful.
-Total tests: 1
-     Passed: 1   ← full pipeline smoke test
-```
+Test pakai `FakeMarketDataService` yang return deterministic bullish setup — tidak perlu broker EA.
 
 ---
 
-## Project Status
+## Hard Risk Invariants
 
-| Epic | Description | Status |
-|------|-------------|--------|
-| **Epic 1** | Infrastructure & API Layer | ✅ Review |
-| **Epic 2** | Frontend Foundation (Next.js) | 🔜 Ready |
-| **Epic 3** | Frontend Actions & Analysis Panels | 🔜 Ready |
-| **Epic 4** | Frontend Sidebar, Integration & Polish | 🔜 Ready |
+Enforced di [src/ForexAI.Infrastructure/Services/RuleBasedRiskEvaluator.cs](src/ForexAI.Infrastructure/Services/RuleBasedRiskEvaluator.cs). Tidak bisa di-bypass via API.
 
-### Epic 1 Stories
-
-| Story | Description | Status |
-|-------|-------------|--------|
-| 1.1 | JSON File Repositories | ✅ |
-| 1.2 | Market Data Stub + Signal Analyzer | ✅ |
-| 1.3 | Rule-Based Risk Evaluator | ✅ |
-| 1.4 | API Controllers + Program.cs Wiring | ✅ |
-| 1.5 | End-to-End Pipeline Smoke Test | ✅ |
-
----
-
-## Hard Risk Limits
-
-These are **system invariants** enforced in code. They cannot be bypassed via the API.
-
-| Rule | Value | Where enforced |
-|------|-------|---------------|
-| Risk per trade | **1%** of equity | `ExecuteTradeHandler` |
-| Max drawdown | **10%** → STOP | `ExecuteTradeHandler` |
-| Max open positions | **3** | `RuleBasedRiskEvaluator` + `ExecuteTradeHandler` |
-| Minimum AI confidence | **60%** | `RuleBasedRiskEvaluator` |
+| Rule | Value |
+|------|-------|
+| Risk per trade | **1%** equity (Nano tier ada $ cap tambahan) |
+| Max drawdown | **10%** → sistem auto-STOP |
+| Max posisi terbuka | **3** |
+| Min confidence | **60** (di bawah ini = auto NO-GO) |
+| Auto-approve threshold | **≥ 70%** confidence |
+| Max trade/hari | **7** |
 
 ---
 
 ## Repository Structure
 
 ```
-├── src/
-│   ├── ForexAI.Domain/          # Entities, value objects, interfaces
-│   ├── ForexAI.Application/     # MediatR use cases
-│   ├── ForexAI.Infrastructure/  # JSON persistence, stub services
-│   └── ForexAI.API/             # REST controllers, Program.cs
-├── tests/
-│   └── ForexAI.Integration/     # WebApplicationFactory smoke test
-├── _bmad-output/
-│   ├── planning-artifacts/      # PRD, architecture, JSON fixtures
-│   └── implementation-artifacts/# Story files, sprint status
-├── skills/                      # Custom BMAD AI agent skills
-├── docs/                        # Wiki
-│   ├── architecture.md
-│   ├── pipeline.md
-│   ├── api-reference.md
-│   └── development.md
-└── ForexAI.sln
-```
+src/
+├── ForexAI.Domain/          # Pure entities, value objects, interfaces
+├── ForexAI.Application/     # Use cases (no infra dependency)
+├── ForexAI.Infrastructure/  # MIFX EA bridge, JSON repos, broker adapters
+└── ForexAI.API/             # ASP.NET Core controllers + SignalR hub
 
----
+frontend/                    # Next.js 14 dashboard (TS + Tailwind)
+mql5/                        # MT5 Expert Advisor source + compiled .ex5
+tests/ForexAI.Integration/   # xUnit + WebApplicationFactory
+data/                        # Runtime data (mostly gitignored)
+├── mode-state.json          # Current trading mode (demo|real)
+├── demo/                    # Demo-mode trade history & cache
+└── real/                    # Real-mode (kosong sampai mode flip)
 
-## BMAD AI Workflow
-
-This project uses the **BMAD framework** for AI-assisted development. All stories are tracked in `_bmad-output/implementation-artifacts/sprint-status.yaml`.
-
-```bash
-/bmad-dev-story        # implement next ready-for-dev story
-/bmad-create-story     # create story file from epics
-/bmad-code-review      # review completed work
-```
-
-Custom forex skills in `skills/`:
-
-```bash
-/forex-market-analysis-signal   # run Farida → signal-output.json
-/forex-risk-management-gate     # run Reza  → risk-decision.json
+docs/                        # Architecture, API, pipeline, dev docs
+└── history/                 # Story specs Epic 1-4 (historical reference)
 ```
 
 ---
 
 ## Docs
 
-- [Architecture](docs/architecture.md) — Clean Architecture layers, design decisions
-- [Pipeline](docs/pipeline.md) — Stage-by-stage trade flow
-- [API Reference](docs/api-reference.md) — Endpoint specs, request/response shapes
-- [Development Guide](docs/development.md) — Setup, testing, adding features
+- [Architecture](docs/architecture.md) — Clean Architecture layers + adapter mapping
+- [Pipeline](docs/pipeline.md) — Stage-by-stage signal/risk/execution flow
+- [API Reference](docs/api-reference.md) — REST endpoint specs
+- [Development Guide](docs/development.md) — Setup, EA deployment, debugging
 
 ---
 

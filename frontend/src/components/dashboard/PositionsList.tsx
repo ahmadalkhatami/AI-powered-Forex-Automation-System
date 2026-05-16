@@ -7,13 +7,15 @@ import type { PositionCardData } from '@/lib/types'
 
 interface PositionsListProps {
   positions: PositionCardData[] | null
-  currentPrice?: number
+  bid?: number
+  ask?: number
+  lastTickAt?: string
   onCloseMarket?: (tradeId: string) => Promise<void>
 }
 
 const HISTORY_PAGE_SIZE = 10
 
-export function PositionsList({ positions, currentPrice, onCloseMarket }: PositionsListProps) {
+export function PositionsList({ positions, bid, ask, lastTickAt, onCloseMarket }: PositionsListProps) {
   const active = positions?.filter((p) => p.status === 'ACTIVE') ?? []
   // History: terbaru di atas (sort by closedAt desc, fallback ke tradeId desc)
   const closed = useMemo(() =>
@@ -81,7 +83,9 @@ export function PositionsList({ positions, currentPrice, onCloseMarket }: Positi
             <PositionCard
               key={position.tradeId}
               position={position}
-              currentPrice={currentPrice}
+              bid={bid}
+              ask={ask}
+              lastTickAt={lastTickAt}
               onCloseMarket={onCloseMarket}
             />
           ))}

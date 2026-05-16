@@ -925,7 +925,9 @@ export default function DashboardPage() {
         />
         <PositionsList
           positions={positionCards.length > 0 ? positionCards : null}
-          currentPrice={currentPrice}
+          bid={mifxStatus?.bid ?? undefined}
+          ask={mifxStatus?.ask ?? undefined}
+          lastTickAt={mifxStatus?.time ?? undefined}
           onCloseMarket={handleCloseMarket}
         />
       </div>

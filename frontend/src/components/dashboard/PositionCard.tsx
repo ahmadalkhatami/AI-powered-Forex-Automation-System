@@ -15,40 +15,64 @@ const borderClasses = {
 
 interface PositionCardProps {
   position: PositionCardData
-  currentPrice?: number  // MIFX live mid price untuk interpolasi PnL antara tick
+  bid?: number          // MIFX bid — BUY exit price (sell back at bid)
+  ask?: number          // MIFX ask — SELL exit price (buy back at ask)
+  lastTickAt?: string   // ISO timestamp of last MIFX tick; > STALE_MS old → fallback to DB
   onCloseMarket?: (tradeId: string) => Promise<void>
 }
 
+// Kalau tick terakhir > 30 detik lalu, anggap stale → jangan interpolasi
+const STALE_MS = 30_000
+
 /**
- * Estimate PnL dari current price + position info (interpolation antara tick broker).
- * Formula: priceDelta × lotSize × contractSize (100k untuk EURUSD).
- * Untuk SELL: priceDelta = entry - currentPrice (profit kalau price turun)
- * Untuk BUY:  priceDelta = currentPrice - entry (profit kalau price naik)
+ * Estimate PnL dari live MIFX bid/ask. Match formula broker:
+ *  - BUY exit at bid:  priceDelta = bid - entry
+ *  - SELL exit at ask: priceDelta = entry - ask
+ * Pakai bid/ask (bukan mid) supaya selaras dengan PnL MIFX yang sudah include spread.
  *
- * Note: ini ESTIMATE, bukan exact realized profit. Spread + commission tidak dihitung.
- * Saat trade close, gunakan realized profit dari broker (via /api/mifx/closed-position).
+ * Fallback ke position.floatingPnl (server-synced) kalau:
+ *  - Tick missing / stale (> 30s)
+ *  - Status bukan ACTIVE
+ *  - Lot size 0 (data corrupt)
  */
-function interpolatePnl(position: PositionCardData, currentPrice: number | undefined) {
-  if (!currentPrice || position.status !== 'ACTIVE' || !position.lotSize) {
+function interpolatePnl(
+  position: PositionCardData,
+  bid: number | undefined,
+  ask: number | undefined,
+  lastTickAt: string | undefined,
+) {
+  if (position.status !== 'ACTIVE' || !position.lotSize) {
     return { pnl: position.floatingPnl, pips: position.floatingPnlPips, isLive: false }
   }
+
+  const stale = !lastTickAt || (Date.now() - new Date(lastTickAt).getTime()) > STALE_MS
+  const exitPrice = position.direction === 'BUY' ? bid : ask
+  if (stale || !exitPrice) {
+    return { pnl: position.floatingPnl, pips: position.floatingPnlPips, isLive: false }
+  }
+
   const priceDelta = position.direction === 'BUY'
-    ? currentPrice - position.entry
-    : position.entry - currentPrice
+    ? exitPrice - position.entry
+    : position.entry - exitPrice
   const pips = Math.round(priceDelta * 10000)
   // EURUSD: 1 lot × 1 pip = $10. Contract size 100,000.
   const pnl = Math.round(priceDelta * position.lotSize * 100000 * 100) / 100
   return { pnl, pips, isLive: true }
 }
 
-export function PositionCard({ position, currentPrice, onCloseMarket }: PositionCardProps) {
+export function PositionCard({ position, bid, ask, lastTickAt, onCloseMarket }: PositionCardProps) {
   const [confirming, setConfirming] = useState(false)
   const [closing, setClosing] = useState(false)
 
-  // Interpolasi PnL realtime dari current MIFX price (no backend lag)
-  const live = useMemo(() => interpolatePnl(position, currentPrice), [position, currentPrice])
+  const live = useMemo(
+    () => interpolatePnl(position, bid, ask, lastTickAt),
+    [position, bid, ask, lastTickAt],
+  )
   const displayPnl = live.pnl
   const displayPips = live.pips
+
+  // Mid untuk display jarak ke SL/TP (cosmetic — bid/ask sama-sama OK di sini)
+  const currentPrice = bid !== undefined && ask !== undefined ? (bid + ask) / 2 : undefined
 
   const handleClose = async () => {
     if (!onCloseMarket) return

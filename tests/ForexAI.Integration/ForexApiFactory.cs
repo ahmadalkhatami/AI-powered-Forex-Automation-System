@@ -1,6 +1,5 @@
 using ForexAI.Domain.Interfaces;
 using ForexAI.Infrastructure.Persistence.Repositories;
-using ForexAI.Infrastructure.Services;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,8 +23,8 @@ public class ForexApiFactory : WebApplicationFactory<Program>
         var dummyContentRoot = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "src", "ForexAI.API");
         Directory.CreateDirectory(dummyContentRoot);
 
-        // Set CWD to project root so that ProjectPaths._bmad-output/ resolution works
-        // for StubMarketDataService and BmadSignalAnalyzer when they use relative paths.
+        // Set CWD to project root so that ProjectPaths.data/ resolution works
+        // for repositories that use relative paths.
         Directory.SetCurrentDirectory(projectRoot);
     }
 
@@ -45,8 +44,8 @@ public class ForexApiFactory : WebApplicationFactory<Program>
             services.AddScoped<ISignalRepository>(_ =>
                 new JsonSignalRepository(_signalsFile));
 
-            // Replace Yahoo Finance with stub so tests don't hit the internet
-            services.AddTransient<IMarketDataService, StubMarketDataService>();
+            // Replace live MIFX market data with deterministic fakes so tests don't depend on broker EA
+            services.AddTransient<IMarketDataService, FakeMarketDataService>();
             services.AddTransient<ICandleDataService>(_ => new NullCandleDataService());
         });
     }
@@ -66,10 +65,10 @@ public class ForexApiFactory : WebApplicationFactory<Program>
         var dir = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
         while (dir != null)
         {
-            if (Directory.Exists(Path.Combine(dir.FullName, "_bmad-output")))
+            if (Directory.Exists(Path.Combine(dir.FullName, "data")))
                 return dir.FullName;
             dir = dir.Parent;
         }
-        throw new InvalidOperationException("Cannot find project root (_bmad-output not found in any ancestor directory)");
+        throw new InvalidOperationException("Cannot find project root (data/ not found in any ancestor directory)");
     }
 }

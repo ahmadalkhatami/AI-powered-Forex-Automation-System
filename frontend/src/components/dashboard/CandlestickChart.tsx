@@ -267,7 +267,7 @@ export function CandlestickChart({
         borderColor: 'rgba(255,255,255,0.08)',
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 25,  // empty area di kanan ~25 bar — supaya position box (nempel last candle) tidak ke-clip
+        rightOffset: 12,  // empty area ~12 bar di kanan — cukup untuk position box yang extend dari overlay area
       },
       width: mainContainerRef.current.clientWidth,
       height: 480,
@@ -597,15 +597,24 @@ export function CandlestickChart({
 
   // Derive position boxes dari tradeOverlay untuk PositionBoxOverlay.
   // Skip box yang ID-nya sudah di-dismiss user (id berbeda = trade/signal baru = muncul lagi).
-  // anchorTime: active pakai openedAt (dari page.tsx), pending fallback ke last candle time
-  // sehingga box nempel ke candle terakhir dan ikut bergerak saat user pan/zoom.
+  //
+  // anchorTime strategy: SELALU pakai (lastCandleTime - 5 bars) supaya box
+  // overlay sebagian recent candles (5 bar terakhir), lalu extend ke kanan
+  // (rightOffset area). Ini bikin box "nempel area candle yang sedang aktif"
+  // — sesuai TradingView position tool style. Trade open location ditandai
+  // oleh trade markers (arrow), bukan box position.
+  //
+  // Saat user pan/zoom: box ikut bergerak karena anchored to time, bukan pixel.
+  const ANCHOR_OFFSET_BARS = 5
   const positionBoxes = useMemo<PositionBox[]>(() => {
     if (!tradeOverlay) return []
     const id = tradeOverlay.id ?? `fallback-${tradeOverlay.direction}-${tradeOverlay.entry}-${tradeOverlay.stopLoss}`
     if (dismissedBoxIds.has(id)) return []
-    const lastCandleTime = candles[candles.length - 1]?.time
-    const anchorTime = tradeOverlay.anchorTime ?? lastCandleTime
-    if (anchorTime === undefined) return []  // no candles yet, can't anchor
+    if (candles.length < 2) return []  // butuh ≥2 candle untuk infer bar duration
+    const lastCandle    = candles[candles.length - 1]
+    const prevCandle    = candles[candles.length - 2]
+    const barDuration   = lastCandle.time - prevCandle.time  // dalam detik
+    const anchorTime    = lastCandle.time - ANCHOR_OFFSET_BARS * barDuration
     return [{
       id,
       entry:            tradeOverlay.entry,

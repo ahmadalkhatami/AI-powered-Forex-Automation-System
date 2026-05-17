@@ -27,14 +27,25 @@ import type { CandleBar, ChartTimeframe, TradePositionResponse } from '@/lib/typ
 import { type Drawing, type DrawingStyle, loadDrawings, saveDrawings } from '@/lib/drawings'
 import { ChartToolbar, type ToolMode } from './ChartToolbar'
 import { ChartDrawingOverlay } from './ChartDrawingOverlay'
+import { PositionBoxOverlay, type PositionBox } from './PositionBoxOverlay'
 
 interface TradeOverlay {
   entry: number
   stopLoss: number
   takeProfit: number
   direction: 'BUY' | 'SELL'
+  /** active = posisi sudah open; pending = signal yang belum di-execute */
+  status?: 'active' | 'pending'
   livePnlPips?: number
   livePnlUsd?: number
+  lotSize?: number
+  riskAmount?: number
+  potentialProfit?: number
+  riskReward?: number
+  /** Anchor time supaya box mulai dari open candle (atau current candle untuk pending). */
+  anchorTime?: number
+  /** Confidence 0-100 untuk pending setup label. */
+  confidence?: number
 }
 
 interface StructureOverlay {
@@ -483,43 +494,8 @@ export function CandlestickChart({
 
     const added: IPriceLine[] = []
 
-    if (tradeOverlay) {
-      const dirColor = tradeOverlay.direction === 'BUY' ? '#3b82f6' : '#f97316'
-      const pnlSuffix =
-        tradeOverlay.livePnlPips !== undefined && tradeOverlay.livePnlUsd !== undefined
-          ? ` · ${tradeOverlay.livePnlPips >= 0 ? '+' : ''}${tradeOverlay.livePnlPips}p ($${tradeOverlay.livePnlUsd.toFixed(2)})`
-          : ''
-      added.push(
-        candleSeriesRef.current.createPriceLine({
-          price: tradeOverlay.entry,
-          color: dirColor,
-          lineStyle: LineStyle.Dashed,
-          lineWidth: 2,
-          axisLabelVisible: true,
-          title: `Entry ${tradeOverlay.direction}${pnlSuffix}`,
-        }),
-      )
-      added.push(
-        candleSeriesRef.current.createPriceLine({
-          price: tradeOverlay.stopLoss,
-          color: '#ef4444',
-          lineStyle: LineStyle.Solid,
-          lineWidth: 2,
-          axisLabelVisible: true,
-          title: 'SL',
-        }),
-      )
-      added.push(
-        candleSeriesRef.current.createPriceLine({
-          price: tradeOverlay.takeProfit,
-          color: '#22c55e',
-          lineStyle: LineStyle.Solid,
-          lineWidth: 2,
-          axisLabelVisible: true,
-          title: 'TP',
-        }),
-      )
-    }
+    // tradeOverlay (entry/SL/TP) dirender oleh PositionBoxOverlay (TradingView-style),
+    // bukan priceLine biasa lagi.
 
     if (structure) {
       added.push(
@@ -545,7 +521,7 @@ export function CandlestickChart({
     }
 
     priceLinesRef.current = added
-  }, [tradeOverlay, structure])
+  }, [structure])
 
   // Markers untuk trade history (entry arrow + exit win/loss square)
   useEffect(() => {
@@ -594,6 +570,26 @@ export function CandlestickChart({
     if (!displayPrice || !prevCandle) return null
     return ((displayPrice - prevCandle.close) / prevCandle.close) * 100
   }, [displayPrice, prevCandle])
+
+  // Derive position boxes dari tradeOverlay untuk PositionBoxOverlay
+  const positionBoxes = useMemo<PositionBox[]>(() => {
+    if (!tradeOverlay) return []
+    return [{
+      entry:            tradeOverlay.entry,
+      stopLoss:         tradeOverlay.stopLoss,
+      takeProfit:       tradeOverlay.takeProfit,
+      direction:        tradeOverlay.direction,
+      status:           tradeOverlay.status ?? 'pending',
+      livePnlPips:      tradeOverlay.livePnlPips,
+      livePnlUsd:       tradeOverlay.livePnlUsd,
+      lotSize:          tradeOverlay.lotSize,
+      riskAmount:       tradeOverlay.riskAmount,
+      potentialProfit:  tradeOverlay.potentialProfit,
+      riskReward:       tradeOverlay.riskReward,
+      anchorTime:       tradeOverlay.anchorTime,
+      confidence:       tradeOverlay.confidence,
+    }]
+  }, [tradeOverlay])
 
   return (
     <Card className="bg-card/50">
@@ -678,6 +674,13 @@ export function CandlestickChart({
         style={isCollapsed ? { display: 'none' } : undefined}
       >
         <div ref={mainContainerRef} className="w-full relative" style={{ minHeight: 480 }}>
+          <PositionBoxOverlay
+            chart={mainChartRef.current}
+            series={candleSeriesRef.current}
+            boxes={positionBoxes}
+            width={chartSize.width}
+            height={chartSize.height}
+          />
           <ChartDrawingOverlay
             chart={mainChartRef.current}
             series={candleSeriesRef.current}

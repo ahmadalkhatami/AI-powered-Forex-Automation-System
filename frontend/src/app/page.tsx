@@ -653,29 +653,50 @@ export default function DashboardPage() {
   const adx14      = rawSignal?.snapshot?.adX14  ?? null
 
   // Overlay TP/SL/Entry untuk chart — prioritas: posisi aktif > validated params > signal params
+  // Auto-draw saat sinyal generated: tradingview-style box muncul otomatis di chart.
   const activePosition = positions.find((p) => p.status === 'ACTIVE')
   const tradeOverlay = activePosition
     ? {
-        entry:        activePosition.entry,
-        stopLoss:     activePosition.stopLoss,
-        takeProfit:   activePosition.takeProfit,
-        direction:    activePosition.direction === 'SELL' ? ('SELL' as const) : ('BUY' as const),
-        livePnlPips:  activePosition.floatingPnlPips,
-        livePnlUsd:   activePosition.floatingPnl,
+        entry:           activePosition.entry,
+        stopLoss:        activePosition.stopLoss,
+        takeProfit:      activePosition.takeProfit,
+        direction:       activePosition.direction === 'SELL' ? ('SELL' as const) : ('BUY' as const),
+        status:          'active' as const,
+        livePnlPips:     activePosition.floatingPnlPips,
+        livePnlUsd:      activePosition.floatingPnl,
+        lotSize:         activePosition.lotSize,
+        riskAmount:      activePosition.riskAmount,
+        potentialProfit: activePosition.potentialProfit,
+        riskReward:      activePosition.riskReward,
+        anchorTime:      activePosition.openedAt
+          ? Math.floor(new Date(activePosition.openedAt).getTime() / 1000)
+          : undefined,
       }
     : riskValidation?.validatedParameters && rawSignal && rawSignal.signal !== 'HOLD'
       ? {
-          entry:      riskValidation.validatedParameters.entry,
-          stopLoss:   riskValidation.validatedParameters.stopLoss,
-          takeProfit: riskValidation.validatedParameters.takeProfit,
-          direction:  rawSignal.signal,
+          entry:           riskValidation.validatedParameters.entry,
+          stopLoss:        riskValidation.validatedParameters.stopLoss,
+          takeProfit:      riskValidation.validatedParameters.takeProfit,
+          direction:       rawSignal.signal,
+          status:          'pending' as const,
+          lotSize:         riskValidation.validatedParameters.lotSize,
+          riskAmount:      riskValidation.validatedParameters.riskAmount,
+          potentialProfit: riskValidation.validatedParameters.potentialProfit,
+          riskReward:      riskValidation.validatedParameters.riskRewardRatio,
+          confidence:      Math.round((rawSignal.confidenceScore ?? 0) * 100),
         }
       : rawSignal && rawSignal.signal !== 'HOLD'
         ? {
-            entry:      rawSignal.parameters.entry,
-            stopLoss:   rawSignal.parameters.stopLoss,
-            takeProfit: rawSignal.parameters.takeProfit,
-            direction:  rawSignal.signal,
+            entry:           rawSignal.parameters.entry,
+            stopLoss:        rawSignal.parameters.stopLoss,
+            takeProfit:      rawSignal.parameters.takeProfit,
+            direction:       rawSignal.signal,
+            status:          'pending' as const,
+            lotSize:         rawSignal.parameters.lotSize,
+            riskAmount:      rawSignal.parameters.riskAmount,
+            potentialProfit: rawSignal.parameters.potentialProfit,
+            riskReward:      rawSignal.parameters.riskRewardRatio,
+            confidence:      Math.round((rawSignal.confidenceScore ?? 0) * 100),
           }
         : null
 

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import {
   MousePointer2, Minus, TrendingUp, Square, Trash2, MoveUpRight, Type, Ruler,
-  GitFork, GitBranch, Magnet, Lock, LockOpen, Palette,
+  GitFork, GitBranch, Magnet, Lock, LockOpen, Palette, EyeOff,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { COLOR_PRESETS, THICKNESS_PRESETS, type DrawingType, type DrawingStyle } from '@/lib/drawings'
@@ -23,6 +23,9 @@ interface ChartToolbarProps {
   drawingCount: number
   snapEnabled?: boolean
   onToggleSnap?: () => void
+  /** Jumlah position box yang sudah di-dismiss user (untuk restore button) */
+  dismissedBoxCount?: number
+  onRestoreDismissedBoxes?: () => void
 }
 
 const TOOLS: Array<{ mode: ToolMode; icon: typeof MousePointer2; label: string }> = [
@@ -50,6 +53,8 @@ export function ChartToolbar({
   drawingCount,
   snapEnabled,
   onToggleSnap,
+  dismissedBoxCount,
+  onRestoreDismissedBoxes,
 }: ChartToolbarProps) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   return (
@@ -69,6 +74,16 @@ export function ChartToolbar({
           <Icon className="h-3.5 w-3.5" />
         </button>
       ))}
+      {onRestoreDismissedBoxes && dismissedBoxCount !== undefined && dismissedBoxCount > 0 && (
+        <button
+          onClick={onRestoreDismissedBoxes}
+          title={`Tampilkan kembali ${dismissedBoxCount} position box yang di-hide`}
+          className="p-1.5 rounded border border-blue-500/40 bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 transition-colors ml-1 flex items-center gap-1"
+        >
+          <EyeOff className="h-3.5 w-3.5" />
+          <span className="text-[10px] font-mono">{dismissedBoxCount}</span>
+        </button>
+      )}
       {onToggleSnap && (
         <button
           onClick={onToggleSnap}

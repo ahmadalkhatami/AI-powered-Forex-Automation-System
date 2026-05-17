@@ -156,6 +156,13 @@ export function CandlestickChart({
     })
   }
 
+  const handleRestoreDismissedBoxes = () => {
+    setDismissedBoxIds(new Set())
+    try {
+      localStorage.removeItem('forexai.dismissedBoxes')
+    } catch {/* ignore */}
+  }
+
   const toggleSnap = () => {
     setSnapEnabled((prev) => {
       const next = !prev
@@ -676,6 +683,8 @@ export function CandlestickChart({
                   drawingCount={drawings.length}
                   snapEnabled={snapEnabled}
                   onToggleSnap={toggleSnap}
+                  dismissedBoxCount={dismissedBoxIds.size}
+                  onRestoreDismissedBoxes={handleRestoreDismissedBoxes}
                 />
               </div>
             )}

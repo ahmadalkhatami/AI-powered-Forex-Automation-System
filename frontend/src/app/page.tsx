@@ -670,6 +670,9 @@ export default function DashboardPage() {
         riskAmount:      activePosition.riskAmount,
         potentialProfit: activePosition.potentialProfit,
         riskReward:      activePosition.riskReward,
+        anchorTime:      activePosition.openedAt
+          ? Math.floor(new Date(activePosition.openedAt).getTime() / 1000)
+          : undefined,
       }
     : riskValidation?.validatedParameters && rawSignal && rawSignal.signal !== 'HOLD'
       ? {

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
-import type { IChartApi, ISeriesApi } from 'lightweight-charts'
+import type { IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts'
 
 export interface PositionBox {
   id: string
@@ -20,6 +20,9 @@ export interface PositionBox {
   livePnlUsd?: number
   /** Confidence 0-100 untuk pending setup label. */
   confidence?: number
+  /** Unix timestamp (s). Box anchor di sini — saat pan/zoom, box ikut bergerak dengan candle.
+   *  Active: openedAt. Pending: last-candle time (nempel ke current bar). */
+  anchorTime: number
 }
 
 interface Props {
@@ -31,7 +34,8 @@ interface Props {
   onDismiss?: (id: string) => void
 }
 
-// Fixed-width box di right edge, nempel ke area candle aktif.
+// Box width fixed di pixel, posisi LEFT edge anchored ke time (candle).
+// Saat user pan/zoom chart, box bergerak ikut candle — bukan fixed di viewport.
 const PRICE_SCALE_PAD = 60   // hindari overlap dengan price scale axis labels
 const BOX_WIDTH = 280
 const LABEL_HEIGHT = 20      // tinggi label pill untuk collision detection
@@ -80,8 +84,19 @@ export function PositionBoxOverlay({ chart, series, boxes, width, height, onDism
       const slY    = slYRaw    as number
       const tpY    = tpYRaw    as number
 
-      const xEnd   = width - PRICE_SCALE_PAD
-      const xStart = Math.max(20, xEnd - BOX_WIDTH)
+      // xStart anchor ke anchorTime → box ikut bergerak saat pan/zoom chart.
+      // Kalau anchorTime di luar visible range, fallback ke viewport right edge.
+      const anchorPxRaw = chart.timeScale().timeToCoordinate(box.anchorTime as UTCTimestamp)
+      let xStart: number
+      if (anchorPxRaw !== null) {
+        xStart = anchorPxRaw as number
+      } else {
+        // Anchor di luar visible range — letakkan box di right edge fallback
+        xStart = width - PRICE_SCALE_PAD - BOX_WIDTH
+      }
+      // Pastikan xStart tidak negatif (box masih partly visible)
+      if (xStart < 0) xStart = 0
+      const xEnd = xStart + BOX_WIDTH
 
       // Collision avoidance: kalau SL/TP label terlalu dekat entry, shift menjauh
       let slLabelY: number = slY

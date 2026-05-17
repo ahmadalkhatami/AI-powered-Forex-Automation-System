@@ -46,6 +46,8 @@ interface TradeOverlay {
   riskReward?: number
   /** Confidence 0-100 untuk pending setup label. */
   confidence?: number
+  /** Unix timestamp (s). Optional — kalau tidak set, fallback ke last candle time. */
+  anchorTime?: number
 }
 
 interface StructureOverlay {
@@ -265,6 +267,7 @@ export function CandlestickChart({
         borderColor: 'rgba(255,255,255,0.08)',
         timeVisible: true,
         secondsVisible: false,
+        rightOffset: 25,  // empty area di kanan ~25 bar — supaya position box (nempel last candle) tidak ke-clip
       },
       width: mainContainerRef.current.clientWidth,
       height: 480,
@@ -594,10 +597,15 @@ export function CandlestickChart({
 
   // Derive position boxes dari tradeOverlay untuk PositionBoxOverlay.
   // Skip box yang ID-nya sudah di-dismiss user (id berbeda = trade/signal baru = muncul lagi).
+  // anchorTime: active pakai openedAt (dari page.tsx), pending fallback ke last candle time
+  // sehingga box nempel ke candle terakhir dan ikut bergerak saat user pan/zoom.
   const positionBoxes = useMemo<PositionBox[]>(() => {
     if (!tradeOverlay) return []
     const id = tradeOverlay.id ?? `fallback-${tradeOverlay.direction}-${tradeOverlay.entry}-${tradeOverlay.stopLoss}`
     if (dismissedBoxIds.has(id)) return []
+    const lastCandleTime = candles[candles.length - 1]?.time
+    const anchorTime = tradeOverlay.anchorTime ?? lastCandleTime
+    if (anchorTime === undefined) return []  // no candles yet, can't anchor
     return [{
       id,
       entry:            tradeOverlay.entry,
@@ -612,8 +620,9 @@ export function CandlestickChart({
       potentialProfit:  tradeOverlay.potentialProfit,
       riskReward:       tradeOverlay.riskReward,
       confidence:       tradeOverlay.confidence,
+      anchorTime,
     }]
-  }, [tradeOverlay, dismissedBoxIds])
+  }, [tradeOverlay, dismissedBoxIds, candles])
 
   return (
     <Card className="bg-card/50">

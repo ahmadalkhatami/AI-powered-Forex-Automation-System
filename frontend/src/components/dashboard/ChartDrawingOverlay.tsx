@@ -61,6 +61,10 @@ export function ChartDrawingOverlay({
   const [hoverPixel, setHoverPixel] = useState<{ x: number; y: number } | null>(null)
   // Apakah kursor sedang di atas drawing existing (cursor mode only)
   const [hoveringDrawing, setHoveringDrawing] = useState(false)
+  // Drag-edit endpoint: drawing yang sedang di-drag + index point-nya
+  const [dragState, setDragState] = useState<{ drawingId: string; pointIndex: number } | null>(null)
+  // Apakah kursor di atas endpoint drawing terpilih (cursor → grab)
+  const [hoveringEndpoint, setHoveringEndpoint] = useState(false)
 
   // Konversi data point → pixel coord
   const dataToPixel = useCallback(
@@ -190,41 +194,121 @@ export function ChartDrawingOverlay({
     }
   }, [chart, render])
 
-  // Track cursor position via chart crosshair untuk hover detection (cursor mode)
+  // Track cursor position via chart crosshair untuk hover detection (cursor mode).
+  // Juga deteksi apakah hovering di endpoint drawing terpilih → enable drag-edit.
   useEffect(() => {
     if (!chart) return
     const handler = (param: MouseEventParams) => {
       if (activeTool !== 'cursor') {
         setHoveringDrawing(false)
+        setHoveringEndpoint(false)
         return
       }
       if (!param.point) {
         setHoveringDrawing(false)
+        setHoveringEndpoint(false)
         return
       }
       const { x, y } = param.point
-      const isOver = drawings.some((d) => hitTest(d, x, y, dataToPixel))
+      // Filter locked drawings dari hit-test — biar bisa pan-through
+      const isOver = drawings.some(
+        (d) => !d.locked && hitTest(d, x, y, dataToPixel),
+      )
       setHoveringDrawing(isOver)
+
+      // Endpoint hit-test untuk drag-edit (cuma kalau ada selected & unlocked)
+      const selected = drawings.find((d) => d.id === selectedId && !d.locked)
+      if (selected) {
+        const overEndpoint = selected.points.some((p) => {
+          const c = dataToPixel(p)
+          if (!c) return false
+          return Math.hypot(x - c.x, y - c.y) <= 8
+        })
+        setHoveringEndpoint(overEndpoint)
+      } else {
+        setHoveringEndpoint(false)
+      }
     }
     chart.subscribeCrosshairMove(handler)
     return () => chart.unsubscribeCrosshairMove(handler)
-  }, [chart, drawings, dataToPixel, activeTool])
+  }, [chart, drawings, dataToPixel, activeTool, selectedId])
 
   // Redraw saat dependency render() berubah
   useEffect(() => {
     render()
   }, [render])
 
+  // MouseDown: kalau di endpoint drawing terpilih → mulai drag-edit.
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (activeTool !== 'cursor' || !selectedId) return
+      const selected = drawings.find((d) => d.id === selectedId)
+      if (!selected || selected.locked) return
+      const rect = (e.target as HTMLCanvasElement).getBoundingClientRect()
+      const px = e.clientX - rect.left
+      const py = e.clientY - rect.top
+      for (let i = 0; i < selected.points.length; i++) {
+        const c = dataToPixel(selected.points[i])
+        if (!c) continue
+        if (Math.hypot(px - c.x, py - c.y) <= 8) {
+          setDragState({ drawingId: selectedId, pointIndex: i })
+          e.preventDefault()
+          return
+        }
+      }
+    },
+    [activeTool, selectedId, drawings, dataToPixel],
+  )
+
+  // Window-level mouse listeners untuk drag — pakai window supaya drag tetap
+  // tertangkap meski kursor keluar canvas.
+  useEffect(() => {
+    if (!dragState) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const onMove = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect()
+      const px = e.clientX - rect.left
+      const py = e.clientY - rect.top
+      let newPoint = pixelToData(px, py)
+      if (!newPoint) return
+      if (snapEnabled && candles.length > 0) {
+        newPoint = snapPoint(newPoint, candles)
+      }
+      onDrawingsChange(
+        drawings.map((d) =>
+          d.id === dragState.drawingId
+            ? { ...d, points: d.points.map((p, i) => (i === dragState.pointIndex ? newPoint! : p)) }
+            : d,
+        ),
+      )
+    }
+    const onUp = () => setDragState(null)
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [dragState, drawings, onDrawingsChange, pixelToData, snapEnabled, candles])
+
   // Click handler — hanya fires saat pointer-events:auto
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
+      // Kalau baru selesai drag, jangan re-process sebagai click
+      if (dragState) return
+
       const rect = (e.target as HTMLCanvasElement).getBoundingClientRect()
       const px = e.clientX - rect.left
       const py = e.clientY - rect.top
 
-      // Cursor mode: hit-test untuk select
+      // Cursor mode: hit-test untuk select (skip locked).
+      // dragState tidak di-list di deps karena hanya dipakai untuk early-return
+      // di awal handler — selalu pakai nilai latest via closure-capture refresh.
       if (activeTool === 'cursor') {
-        const hit = drawings.find((d) => hitTest(d, px, py, dataToPixel))
+        const hit = drawings.find((d) => !d.locked && hitTest(d, px, py, dataToPixel))
         onSelectedIdChange(hit?.id ?? null)
         return
       }
@@ -295,7 +379,7 @@ export function ChartDrawingOverlay({
         setHoverPixel(null)
       }
     },
-    [activeTool, drawings, dataToPixel, pixelToData, pendingPoints, onSelectedIdChange, onDrawingsChange, snapEnabled, candles],
+    [activeTool, drawings, dataToPixel, pixelToData, pendingPoints, onSelectedIdChange, onDrawingsChange, snapEnabled, candles, dragState],
   )
 
   const handleMouseMove = useCallback(
@@ -325,19 +409,25 @@ export function ChartDrawingOverlay({
     setHoverPixel(null)
   }, [activeTool])
 
-  // Cursor mode + hover di drawing → capture click untuk select.
+  // Cursor mode + hover di drawing/endpoint → capture click untuk select/drag.
   // Cursor mode + tidak hover → pass-through ke chart untuk pan/zoom.
   // Drawing tool aktif → selalu capture.
-  const pointerActive = activeTool !== 'cursor' || hoveringDrawing
-  const cursorStyle =
-    activeTool === 'cursor'
-      ? (hoveringDrawing ? 'pointer' : 'default')
-      : 'crosshair'
+  // Dragging in-progress → capture (window listeners juga aktif untuk antisipasi
+  // mouse keluar canvas).
+  const pointerActive = activeTool !== 'cursor' || hoveringDrawing || hoveringEndpoint || !!dragState
+  const cursorStyle = (() => {
+    if (activeTool !== 'cursor') return 'crosshair'
+    if (dragState) return 'grabbing'
+    if (hoveringEndpoint) return 'grab'
+    if (hoveringDrawing) return 'pointer'
+    return 'default'
+  })()
 
   return (
     <canvas
       ref={canvasRef}
       onClick={handleClick}
+      onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       style={{
         position: 'absolute',
@@ -518,8 +608,8 @@ function drawShape(
     drawFibExtension(ctx, d.points[0], d.points[1], d.points[2], dataToPixel, canvasWidth, d.style.color)
   }
 
-  // Selection highlight: titik kecil di endpoints
-  if (selected) {
+  // Selection highlight: titik kecil di endpoints (kecuali locked)
+  if (selected && !d.locked) {
     ctx.setLineDash([])
     ctx.fillStyle = '#ffffff'
     ctx.strokeStyle = d.style.color
@@ -531,6 +621,21 @@ function drawShape(
       ctx.arc(c.x, c.y, 4, 0, Math.PI * 2)
       ctx.fill()
       ctx.stroke()
+    }
+  }
+
+  // Lock indicator: 🔒 kecil di endpoint pertama
+  if (d.locked) {
+    const c = dataToPixel(d.points[0])
+    if (c) {
+      ctx.setLineDash([])
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)'
+      ctx.fillRect(c.x - 7, c.y - 7, 14, 14)
+      ctx.fillStyle = '#9ca3af'
+      ctx.font = '10px ui-sans-serif, system-ui'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText('🔒', c.x, c.y + 1)
     }
   }
 }

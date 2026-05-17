@@ -36,11 +36,28 @@ export interface DrawingStyle {
 export interface Drawing {
   id: string
   type: DrawingType
-  points: DrawingPoint[]   // hline/text: 1, trendline/rectangle/ray/measure: 2
+  points: DrawingPoint[]   // hline/text: 1, trendline/rectangle/ray/measure: 2, fib-extension: 3
   style: DrawingStyle
   createdAt: string        // ISO timestamp
   text?: string            // untuk type === 'text' (annotation content)
+  locked?: boolean         // kalau true: tidak bisa di-select/edit/delete (skip clear all juga)
 }
+
+/** Preset colors untuk style picker. */
+export const COLOR_PRESETS = [
+  '#fbbf24', // amber
+  '#f59e0b', // orange
+  '#ef4444', // red
+  '#a3e635', // lime
+  '#22c55e', // green
+  '#60a5fa', // blue
+  '#06b6d4', // cyan
+  '#a78bfa', // purple
+  '#ec4899', // pink
+  '#e5e7eb', // gray-200
+] as const
+
+export const THICKNESS_PRESETS = [1, 2, 3, 4] as const
 
 export const DEFAULT_STYLES: Record<DrawingType, DrawingStyle> = {
   hline:             { color: '#fbbf24', width: 1, dashed: true },   // amber

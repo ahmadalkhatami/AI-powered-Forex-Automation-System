@@ -1,11 +1,12 @@
 'use client'
 
+import { useState } from 'react'
 import {
   MousePointer2, Minus, TrendingUp, Square, Trash2, MoveUpRight, Type, Ruler,
-  GitFork, GitBranch, Magnet,
+  GitFork, GitBranch, Magnet, Lock, LockOpen, Palette,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { DrawingType } from '@/lib/drawings'
+import { COLOR_PRESETS, THICKNESS_PRESETS, type DrawingType, type DrawingStyle } from '@/lib/drawings'
 
 export type ToolMode = 'cursor' | DrawingType
 
@@ -15,6 +16,10 @@ interface ChartToolbarProps {
   onClearAll?: () => void
   onDeleteSelected?: () => void
   selectedId: string | null
+  selectedStyle?: DrawingStyle
+  selectedLocked?: boolean
+  onUpdateSelectedStyle?: (style: Partial<DrawingStyle>) => void
+  onToggleLockSelected?: () => void
   drawingCount: number
   snapEnabled?: boolean
   onToggleSnap?: () => void
@@ -38,12 +43,17 @@ export function ChartToolbar({
   onClearAll,
   onDeleteSelected,
   selectedId,
+  selectedStyle,
+  selectedLocked,
+  onUpdateSelectedStyle,
+  onToggleLockSelected,
   drawingCount,
   snapEnabled,
   onToggleSnap,
 }: ChartToolbarProps) {
+  const [paletteOpen, setPaletteOpen] = useState(false)
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1 relative">
       {TOOLS.map(({ mode, icon: Icon, label }) => (
         <button
           key={mode}
@@ -75,14 +85,87 @@ export function ChartToolbar({
           <Magnet className="h-3.5 w-3.5" />
         </button>
       )}
-      {selectedId && onDeleteSelected && (
+      {selectedId && onUpdateSelectedStyle && selectedStyle && (
+        <button
+          onClick={() => setPaletteOpen((v) => !v)}
+          title="Ubah warna & tebal garis drawing terpilih"
+          className={cn(
+            'p-1.5 rounded border transition-colors ml-1',
+            paletteOpen
+              ? 'bg-primary/15 border-primary/40 text-primary'
+              : 'border-border/40 text-muted-foreground hover:text-foreground hover:border-border',
+          )}
+        >
+          <Palette className="h-3.5 w-3.5" />
+        </button>
+      )}
+      {selectedId && onToggleLockSelected && (
+        <button
+          onClick={onToggleLockSelected}
+          title={selectedLocked ? 'Unlock drawing — bisa di-edit/delete lagi' : 'Lock drawing — protect dari edit/delete'}
+          className={cn(
+            'p-1.5 rounded border transition-colors',
+            selectedLocked
+              ? 'bg-amber-500/15 border-amber-500/40 text-amber-500'
+              : 'border-border/40 text-muted-foreground hover:text-foreground hover:border-border',
+          )}
+        >
+          {selectedLocked ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}
+        </button>
+      )}
+      {selectedId && !selectedLocked && onDeleteSelected && (
         <button
           onClick={onDeleteSelected}
           title="Hapus drawing terpilih (DEL)"
-          className="p-1.5 rounded border border-red-500/40 bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors ml-1"
+          className="p-1.5 rounded border border-red-500/40 bg-red-500/10 text-red-500 hover:bg-red-500/20 transition-colors"
         >
           <Trash2 className="h-3.5 w-3.5" />
         </button>
+      )}
+      {/* Style picker popover */}
+      {paletteOpen && selectedId && selectedStyle && onUpdateSelectedStyle && (
+        <div className="absolute top-full right-0 mt-1 z-10 bg-background border border-border/60 rounded-md p-2 shadow-lg space-y-2 min-w-[200px]">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Color</div>
+            <div className="grid grid-cols-5 gap-1">
+              {COLOR_PRESETS.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => onUpdateSelectedStyle({ color: c })}
+                  className={cn(
+                    'h-5 w-5 rounded border-2 transition-transform hover:scale-110',
+                    selectedStyle.color === c ? 'border-foreground scale-110' : 'border-transparent',
+                  )}
+                  style={{ backgroundColor: c }}
+                  title={c}
+                />
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Thickness</div>
+            <div className="flex gap-1">
+              {THICKNESS_PRESETS.map((w) => (
+                <button
+                  key={w}
+                  onClick={() => onUpdateSelectedStyle({ width: w })}
+                  className={cn(
+                    'flex-1 h-7 rounded border flex items-center justify-center transition-colors',
+                    selectedStyle.width === w
+                      ? 'bg-primary/15 border-primary/40 text-primary'
+                      : 'border-border/40 text-muted-foreground hover:text-foreground hover:border-border',
+                  )}
+                  title={`${w}px`}
+                >
+                  <span
+                    className="rounded-sm bg-current"
+                    style={{ width: '16px', height: `${w}px` }}
+                  />
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
       {drawingCount > 0 && onClearAll && (
         <>

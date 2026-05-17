@@ -24,7 +24,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { computeSMA, computeRSI } from '@/lib/indicators'
 import type { CandleBar, ChartTimeframe, TradePositionResponse } from '@/lib/types'
-import { type Drawing, loadDrawings, saveDrawings } from '@/lib/drawings'
+import { type Drawing, type DrawingStyle, loadDrawings, saveDrawings } from '@/lib/drawings'
 import { ChartToolbar, type ToolMode } from './ChartToolbar'
 import { ChartDrawingOverlay } from './ChartDrawingOverlay'
 
@@ -141,14 +141,18 @@ export function CandlestickChart({
     saveDrawings(pair, timeframe, drawings)
   }, [pair, timeframe, drawings])
 
-  // DEL/Backspace untuk hapus drawing yang dipilih
+  // DEL/Backspace untuk hapus drawing yang dipilih (skip kalau locked)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawingId) {
         const target = e.target as HTMLElement
         const tag = target.tagName.toLowerCase()
         if (tag === 'input' || tag === 'textarea' || target.isContentEditable) return
-        setDrawings((prev) => prev.filter((d) => d.id !== selectedDrawingId))
+        setDrawings((prev) => {
+          const found = prev.find((d) => d.id === selectedDrawingId)
+          if (found?.locked) return prev  // locked: jangan hapus
+          return prev.filter((d) => d.id !== selectedDrawingId)
+        })
         setSelectedDrawingId(null)
       }
     }
@@ -157,18 +161,47 @@ export function CandlestickChart({
   }, [selectedDrawingId])
 
   const handleClearAllDrawings = () => {
-    if (drawings.length === 0) return
-    if (window.confirm(`Hapus semua ${drawings.length} drawing di ${pair} ${timeframe}?`)) {
-      setDrawings([])
+    const unlocked = drawings.filter((d) => !d.locked)
+    if (unlocked.length === 0) return
+    const lockedCount = drawings.length - unlocked.length
+    const msg = lockedCount > 0
+      ? `Hapus ${unlocked.length} drawing? (${lockedCount} locked akan tetap ada)`
+      : `Hapus semua ${unlocked.length} drawing di ${pair} ${timeframe}?`
+    if (window.confirm(msg)) {
+      setDrawings((prev) => prev.filter((d) => d.locked))
       setSelectedDrawingId(null)
     }
   }
 
   const handleDeleteSelected = () => {
     if (!selectedDrawingId) return
+    const target = drawings.find((d) => d.id === selectedDrawingId)
+    if (target?.locked) return  // locked: tidak boleh hapus
     setDrawings((prev) => prev.filter((d) => d.id !== selectedDrawingId))
     setSelectedDrawingId(null)
   }
+
+  const handleToggleLockSelected = () => {
+    if (!selectedDrawingId) return
+    setDrawings((prev) =>
+      prev.map((d) => (d.id === selectedDrawingId ? { ...d, locked: !d.locked } : d)),
+    )
+  }
+
+  const handleUpdateSelectedStyle = (patch: Partial<DrawingStyle>) => {
+    if (!selectedDrawingId) return
+    setDrawings((prev) =>
+      prev.map((d) =>
+        d.id === selectedDrawingId
+          ? { ...d, style: { ...d.style, ...patch } }
+          : d,
+      ),
+    )
+  }
+
+  const selectedDrawing = selectedDrawingId
+    ? drawings.find((d) => d.id === selectedDrawingId)
+    : undefined
 
   const toggleCollapsed = () => {
     setIsCollapsed((prev) => {
@@ -598,6 +631,10 @@ export function CandlestickChart({
                   onClearAll={handleClearAllDrawings}
                   onDeleteSelected={handleDeleteSelected}
                   selectedId={selectedDrawingId}
+                  selectedStyle={selectedDrawing?.style}
+                  selectedLocked={selectedDrawing?.locked}
+                  onUpdateSelectedStyle={handleUpdateSelectedStyle}
+                  onToggleLockSelected={handleToggleLockSelected}
                   drawingCount={drawings.length}
                   snapEnabled={snapEnabled}
                   onToggleSnap={toggleSnap}

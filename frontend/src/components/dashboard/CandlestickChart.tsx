@@ -554,14 +554,20 @@ export function CandlestickChart({
     priceLinesRef.current = added
   }, [structure])
 
-  // Markers untuk trade history (entry arrow + exit win/loss square)
+  // Markers untuk trade history (entry arrow + exit win/loss square).
+  // Di D1: skip closed-trade history (banyak trade di hari sama → numpuk
+  // di 1 candle harian = chart kotor). Hanya tampilkan ACTIVE position.
+  // Di M15/H1: tampilkan semua history (each trade di bar berbeda).
   useEffect(() => {
     if (!markersRef.current || candles.length === 0) return
 
+    const isHighTf = timeframe === 'D1'
     const markers: SeriesMarker<Time>[] = []
     positions.forEach((pos) => {
       if (pos.status === 'SKIPPED' || !pos.openedAt) return
       if (pos.direction !== 'BUY' && pos.direction !== 'SELL') return
+      // D1: skip closed positions entirely
+      if (isHighTf && pos.status !== 'ACTIVE') return
 
       const entryTime = snapToCandleTime(pos.openedAt, candles)
       if (entryTime !== null) {
@@ -592,7 +598,7 @@ export function CandlestickChart({
 
     markers.sort((a, b) => (a.time as number) - (b.time as number))
     markersRef.current.setMarkers(markers)
-  }, [positions, candles])
+  }, [positions, candles, timeframe])
 
   const lastCandle = candles[candles.length - 1]
   const prevCandle = candles[candles.length - 2]

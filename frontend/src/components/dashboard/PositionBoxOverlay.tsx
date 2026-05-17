@@ -84,39 +84,65 @@ export function PositionBoxOverlay({ chart, series, boxes, width, height, onDism
       const tpY    = tpYRaw    as number
 
       // xStart anchor ke anchorTime → box ikut bergerak saat pan/zoom chart.
-      // Kalau anchorTime di luar visible range, fallback ke viewport right edge.
+      // Kalau anchorTime di luar visible range, SKIP box ini (ikut hilang dengan candle).
       const anchorPxRaw = chart.timeScale().timeToCoordinate(box.anchorTime as UTCTimestamp)
-      let xStart: number
-      if (anchorPxRaw !== null) {
-        xStart = anchorPxRaw as number
-      } else {
-        // Anchor di luar visible range — letakkan box di right edge fallback
-        xStart = width - PRICE_SCALE_PAD - BOX_WIDTH
-      }
-      // Pastikan xStart tidak negatif (box masih partly visible)
+      if (anchorPxRaw === null) continue
+      let xStart = anchorPxRaw as number
+      // Box harus tetap visible — clamp ke viewport bounds tapi jangan offset terlalu jauh
+      // supaya posisi tetap "nempel" dengan candle yang sedang aktif
+      const maxXStart = width - PRICE_SCALE_PAD - BOX_WIDTH
+      if (xStart > maxXStart) xStart = maxXStart
       if (xStart < 0) xStart = 0
       const xEnd = xStart + BOX_WIDTH
 
-      // Label positioning: offset Stop label ke OUTSIDE box (jauh dari entry),
-      // dan Target label juga OUTSIDE box di sisi lain. Entry tetap on line.
-      // Cegah overlap di tight spacing (e.g. D1 wide price range).
-      const slOutsideOffset = 12
-      const tpOutsideOffset = 12
-      // Stop: kalau SL di atas entry → label di atas SL. Kalau di bawah → label di bawah SL.
-      let slLabelY: number = slY < entryY ? slY - slOutsideOffset : slY + slOutsideOffset
-      let tpLabelY: number = tpY < entryY ? tpY - tpOutsideOffset : tpY + tpOutsideOffset
+      // Label positioning + collision resolver: jaga gap minimum antar label.
+      // Setiap label tinggi ~20px (10px font + 4px pad atas/bawah + border).
+      // Outside offset awal 12px, lalu kalau masih overlap di-push lagi.
+      const LABEL_HEIGHT = 20
+      const MIN_GAP = 4
+      const baseOffset = 12
+
+      // Tentukan arah label berdasarkan posisi SL/TP relatif terhadap Entry.
+      const slAbove = slY < entryY
+      const tpAbove = tpY < entryY
+      let slLabelY: number = slAbove ? slY - baseOffset : slY + baseOffset
+      let tpLabelY: number = tpAbove ? tpY - baseOffset : tpY + baseOffset
+      const entryLabelY: number = entryY
+
+      // Collision resolver: untuk setiap pasang label yang berdekatan,
+      // push label "luar" menjauh sampai gap >= LABEL_HEIGHT + MIN_GAP.
+      const minDist = LABEL_HEIGHT + MIN_GAP
+      // Entry ↔ SL
+      if (Math.abs(slLabelY - entryLabelY) < minDist) {
+        slLabelY = slAbove ? entryLabelY - minDist : entryLabelY + minDist
+      }
+      // Entry ↔ TP
+      if (Math.abs(tpLabelY - entryLabelY) < minDist) {
+        tpLabelY = tpAbove ? entryLabelY - minDist : entryLabelY + minDist
+      }
+      // Kalau SL dan TP di sisi yang sama dari entry (jarang tapi mungkin di pending preview)
+      if (slAbove === tpAbove && Math.abs(slLabelY - tpLabelY) < minDist) {
+        if (slAbove) {
+          // Keduanya di atas — yang lebih jauh dari entry di-push lebih jauh lagi
+          if (slY <= tpY) slLabelY = tpLabelY - minDist
+          else tpLabelY = slLabelY - minDist
+        } else {
+          if (slY >= tpY) slLabelY = tpLabelY + minDist
+          else tpLabelY = slLabelY + minDist
+        }
+      }
+
       // Clamp supaya label tidak keluar chart vertical bounds
-      if (slLabelY < 12) slLabelY = 12
-      if (slLabelY > height - 12) slLabelY = height - 12
-      if (tpLabelY < 12) tpLabelY = 12
-      if (tpLabelY > height - 12) tpLabelY = height - 12
+      const clamp = (v: number) => Math.max(12, Math.min(height - 12, v))
+      slLabelY = clamp(slLabelY)
+      tpLabelY = clamp(tpLabelY)
 
       result.push({
         id: box.id,
         xStart, xEnd,
         slY, tpY, entryY,
         slLabelY, tpLabelY,
-        entryLabelY: entryY,
+        entryLabelY,
         topY: Math.min(slY, tpY),
       })
     }

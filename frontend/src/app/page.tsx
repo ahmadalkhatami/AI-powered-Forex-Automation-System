@@ -654,9 +654,11 @@ export default function DashboardPage() {
 
   // Overlay TP/SL/Entry untuk chart — prioritas: posisi aktif > validated params > signal params
   // Auto-draw saat sinyal generated: tradingview-style box muncul otomatis di chart.
+  // ID stabil per trade/signal — kalau user dismiss, box stay-hidden sampai trade/signal baru muncul.
   const activePosition = positions.find((p) => p.status === 'ACTIVE')
   const tradeOverlay = activePosition
     ? {
+        id:              `active-${activePosition.tradeId}`,
         entry:           activePosition.entry,
         stopLoss:        activePosition.stopLoss,
         takeProfit:      activePosition.takeProfit,
@@ -668,12 +670,10 @@ export default function DashboardPage() {
         riskAmount:      activePosition.riskAmount,
         potentialProfit: activePosition.potentialProfit,
         riskReward:      activePosition.riskReward,
-        anchorTime:      activePosition.openedAt
-          ? Math.floor(new Date(activePosition.openedAt).getTime() / 1000)
-          : undefined,
       }
     : riskValidation?.validatedParameters && rawSignal && rawSignal.signal !== 'HOLD'
       ? {
+          id:              `pending-validated-${rawSignal.id}`,
           entry:           riskValidation.validatedParameters.entry,
           stopLoss:        riskValidation.validatedParameters.stopLoss,
           takeProfit:      riskValidation.validatedParameters.takeProfit,
@@ -687,6 +687,7 @@ export default function DashboardPage() {
         }
       : rawSignal && rawSignal.signal !== 'HOLD'
         ? {
+            id:              `pending-signal-${rawSignal.id}`,
             entry:           rawSignal.parameters.entry,
             stopLoss:        rawSignal.parameters.stopLoss,
             takeProfit:      rawSignal.parameters.takeProfit,

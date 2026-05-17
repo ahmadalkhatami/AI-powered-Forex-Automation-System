@@ -1,9 +1,11 @@
 'use client'
 
-import { useCallback, useEffect, useRef } from 'react'
-import type { IChartApi, ISeriesApi, UTCTimestamp } from 'lightweight-charts'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { X } from 'lucide-react'
+import type { IChartApi, ISeriesApi } from 'lightweight-charts'
 
 export interface PositionBox {
+  id: string
   entry: number
   stopLoss: number
   takeProfit: number
@@ -11,14 +13,12 @@ export interface PositionBox {
   /** active = posisi sudah open; pending = signal yang belum di-execute */
   status: 'active' | 'pending'
   lotSize?: number
-  riskAmount?: number       // $ amount at risk (lot × pip distance × pip value)
+  riskAmount?: number       // $ amount at risk
   potentialProfit?: number  // $ potential profit at TP
-  riskReward?: number       // RR ratio (potentialProfit / riskAmount)
+  riskReward?: number       // RR ratio
   livePnlPips?: number
   livePnlUsd?: number
-  /** Optional anchor time supaya box mulai dari titik open. Kalau null, mulai dari ~65% chart. */
-  anchorTime?: number
-  /** Optional confidence label di tengah untuk pending signal (0-100). */
+  /** Confidence 0-100 untuk pending setup label. */
   confidence?: number
 }
 
@@ -28,17 +28,82 @@ interface Props {
   boxes: PositionBox[]
   width: number
   height: number
+  onDismiss?: (id: string) => void
+}
+
+// Fixed-width box di right edge, nempel ke area candle aktif.
+const PRICE_SCALE_PAD = 60   // hindari overlap dengan price scale axis labels
+const BOX_WIDTH = 280
+const LABEL_HEIGHT = 20      // tinggi label pill untuk collision detection
+const CLOSE_BTN_SIZE = 18
+
+interface BoxLayout {
+  id: string
+  /** Pixel x range box */
+  xStart: number
+  xEnd: number
+  /** Pixel y untuk SL/TP/Entry (sebelum collision adjust) */
+  slY: number
+  tpY: number
+  entryY: number
+  /** Pixel y label setelah collision adjust */
+  slLabelY: number
+  tpLabelY: number
+  entryLabelY: number
+  /** Top edge box untuk posisi close button */
+  topY: number
 }
 
 /**
- * Render TradingView-style "long/short position" tool — box red/green dengan
- * labels pip/%/$/RR. Read-only (interactive drag-edit di future stage).
+ * Render TradingView-style "long/short position" tool — fixed-width box
+ * di right edge chart (nempel area candle aktif), labels centered di
+ * dalam box width supaya tidak overlap dengan price scale axis labels.
  *
- * Layer di antara chart canvas dan drawing overlay (z-index 3, drawing 5).
- * Subscribe ke visible range change supaya box auto-redraw saat zoom/pan.
+ * Read-only canvas + HTML close button (×) per box untuk manual dismiss.
  */
-export function PositionBoxOverlay({ chart, series, boxes, width, height }: Props) {
+export function PositionBoxOverlay({ chart, series, boxes, width, height, onDismiss }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [layouts, setLayouts] = useState<BoxLayout[]>([])
+  // renderTick force re-compute layouts saat chart pan/zoom (priceToCoordinate berubah)
+  const [renderTick, setRenderTick] = useState(0)
+
+  const computeLayouts = useCallback((): BoxLayout[] => {
+    if (!chart || !series) return []
+    const result: BoxLayout[] = []
+    for (const box of boxes) {
+      const entryYRaw = series.priceToCoordinate(box.entry)
+      const slYRaw    = series.priceToCoordinate(box.stopLoss)
+      const tpYRaw    = series.priceToCoordinate(box.takeProfit)
+      if (entryYRaw === null || slYRaw === null || tpYRaw === null) continue
+      // Coordinate is branded number — unwrap ke plain number untuk arithmetic
+      const entryY = entryYRaw as number
+      const slY    = slYRaw    as number
+      const tpY    = tpYRaw    as number
+
+      const xEnd   = width - PRICE_SCALE_PAD
+      const xStart = Math.max(20, xEnd - BOX_WIDTH)
+
+      // Collision avoidance: kalau SL/TP label terlalu dekat entry, shift menjauh
+      let slLabelY: number = slY
+      let tpLabelY: number = tpY
+      if (Math.abs(slY - entryY) < LABEL_HEIGHT) {
+        slLabelY = slY < entryY ? entryY - LABEL_HEIGHT : entryY + LABEL_HEIGHT
+      }
+      if (Math.abs(tpY - entryY) < LABEL_HEIGHT) {
+        tpLabelY = tpY < entryY ? entryY - LABEL_HEIGHT : entryY + LABEL_HEIGHT
+      }
+
+      result.push({
+        id: box.id,
+        xStart, xEnd,
+        slY, tpY, entryY,
+        slLabelY, tpLabelY,
+        entryLabelY: entryY,
+        topY: Math.min(slY, tpY),
+      })
+    }
+    return result
+  }, [boxes, chart, series, width])
 
   const render = useCallback(() => {
     const canvas = canvasRef.current
@@ -53,16 +118,21 @@ export function PositionBoxOverlay({ chart, series, boxes, width, height }: Prop
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, width, height)
 
-    for (const box of boxes) {
-      drawPositionBox(ctx, box, chart, series, width)
+    const newLayouts = computeLayouts()
+    for (let i = 0; i < boxes.length && i < newLayouts.length; i++) {
+      drawPositionBox(ctx, boxes[i], newLayouts[i])
     }
-  }, [chart, series, boxes, width, height])
+    setLayouts(newLayouts)
+  }, [boxes, chart, series, width, height, computeLayouts])
 
   // Redraw saat zoom/pan
   useEffect(() => {
     if (!chart) return
     const ts = chart.timeScale()
-    const handler = () => render()
+    const handler = () => {
+      render()
+      setRenderTick((t) => t + 1)
+    }
     ts.subscribeVisibleLogicalRangeChange(handler)
     return () => ts.unsubscribeVisibleLogicalRangeChange(handler)
   }, [chart, render])
@@ -72,46 +142,64 @@ export function PositionBoxOverlay({ chart, series, boxes, width, height }: Prop
   }, [render])
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        width,
-        height,
-        pointerEvents: 'none',
-        zIndex: 3,
-      }}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width,
+          height,
+          pointerEvents: 'none',
+          zIndex: 3,
+        }}
+      />
+      {onDismiss && layouts.map((layout) => (
+        <button
+          key={layout.id + '-close-' + renderTick}
+          onClick={() => onDismiss(layout.id)}
+          title="Tutup position box"
+          style={{
+            position: 'absolute',
+            left: layout.xEnd - CLOSE_BTN_SIZE - 4,
+            top: layout.topY + 4,
+            width: CLOSE_BTN_SIZE,
+            height: CLOSE_BTN_SIZE,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(15, 23, 42, 0.85)',
+            color: '#94a3b8',
+            border: '1px solid rgba(255,255,255,0.15)',
+            borderRadius: 4,
+            cursor: 'pointer',
+            padding: 0,
+            pointerEvents: 'auto',
+            zIndex: 4,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = '#ef4444'
+            e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.5)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = '#94a3b8'
+            e.currentTarget.style.borderColor = 'rgba(255,255,255,0.15)'
+          }}
+        >
+          <X size={12} strokeWidth={2.5} />
+        </button>
+      ))}
+    </>
   )
 }
 
 function drawPositionBox(
   ctx: CanvasRenderingContext2D,
   box: PositionBox,
-  chart: IChartApi,
-  series: ISeriesApi<'Candlestick'>,
-  canvasWidth: number,
+  layout: BoxLayout,
 ) {
-  const entryY = series.priceToCoordinate(box.entry)
-  const slY = series.priceToCoordinate(box.stopLoss)
-  const tpY = series.priceToCoordinate(box.takeProfit)
-  if (entryY === null || slY === null || tpY === null) return
-
-  // X start: dari anchorTime kalau ada, else 65% chart width
-  let xStart: number
-  if (box.anchorTime !== undefined) {
-    const coord = chart.timeScale().timeToCoordinate(box.anchorTime as UTCTimestamp)
-    xStart = coord !== null ? coord : canvasWidth * 0.65
-  } else {
-    xStart = canvasWidth * 0.65
-  }
-  // Pastikan box punya lebar minimum
-  if (xStart > canvasWidth - 100) xStart = canvasWidth - 200
-  if (xStart < 0) xStart = 0
-  const xEnd = canvasWidth - 8
-
+  const { xStart, xEnd, slY, tpY, entryY, slLabelY, tpLabelY, entryLabelY } = layout
   const pending = box.status === 'pending'
   const opacity = pending ? 0.55 : 1
   const dash: number[] = pending ? [5, 4] : []
@@ -140,7 +228,7 @@ function drawPositionBox(
   ctx.lineTo(xEnd, entryY)
   ctx.stroke()
 
-  // ── Labels ────────────────────────────────────────────────────────────
+  // ── Labels (centered di dalam box width) ──────────────────────────────
   ctx.font = '10px ui-monospace, SFMono-Regular, monospace'
   ctx.textBaseline = 'middle'
 
@@ -149,61 +237,48 @@ function drawPositionBox(
   const slPct = Math.abs(box.stopLoss - box.entry) / box.entry * 100
   const tpPct = Math.abs(box.takeProfit - box.entry) / box.entry * 100
 
-  // SL label (di sisi SL — atas kalau SELL/SL above entry, bawah kalau BUY)
-  drawPillLabel(
+  const centerX = (xStart + xEnd) / 2
+
+  // SL label
+  drawPillLabelCentered(
     ctx,
     `Stop: ${slPips}p (${slPct.toFixed(2)}%)${box.riskAmount ? ` · $${box.riskAmount.toFixed(2)}` : ''}`,
-    xEnd - 4,
-    slY,
-    '#ef4444',
-    'right',
-    pending ? 0.7 : 1,
+    centerX, slLabelY, '#ef4444', opacity,
   )
 
   // TP label
-  drawPillLabel(
+  drawPillLabelCentered(
     ctx,
     `Target: ${tpPips}p (${tpPct.toFixed(2)}%)${box.potentialProfit ? ` · $${box.potentialProfit.toFixed(2)}` : ''}`,
-    xEnd - 4,
-    tpY,
-    '#22c55e',
-    'right',
-    pending ? 0.7 : 1,
+    centerX, tpLabelY, '#22c55e', opacity,
   )
 
-  // Entry label (di tengah, kanan, dengan P&L + RR + status)
-  const entryLabelParts: string[] = []
+  // Entry label
+  const entryParts: string[] = []
   if (pending) {
-    entryLabelParts.push('SETUP')
-    if (box.confidence !== undefined) entryLabelParts.push(`${box.confidence}%`)
+    entryParts.push('SETUP')
+    if (box.confidence !== undefined) entryParts.push(`${box.confidence}%`)
   } else {
     if (box.livePnlUsd !== undefined && box.livePnlPips !== undefined) {
       const sign = box.livePnlUsd >= 0 ? '+' : ''
-      entryLabelParts.push(`${sign}$${box.livePnlUsd.toFixed(2)} (${sign}${box.livePnlPips}p)`)
+      entryParts.push(`${sign}$${box.livePnlUsd.toFixed(2)} (${sign}${box.livePnlPips}p)`)
     }
   }
-  if (box.lotSize) entryLabelParts.push(`${box.lotSize.toFixed(2)} lot`)
-  if (box.riskReward) entryLabelParts.push(`RR 1:${box.riskReward.toFixed(2)}`)
-  const entryLabel = `${box.direction} ${box.entry.toFixed(5)} · ${entryLabelParts.join(' · ')}`
+  if (box.lotSize) entryParts.push(`${box.lotSize.toFixed(2)} lot`)
+  if (box.riskReward) entryParts.push(`RR 1:${box.riskReward.toFixed(2)}`)
+  const entryLabel = `${box.direction} ${box.entry.toFixed(5)} · ${entryParts.join(' · ')}`
 
-  drawPillLabel(
-    ctx,
-    entryLabel,
-    xStart + 6,
-    entryY,
-    entryColor,
-    'left',
-    pending ? 0.7 : 1,
+  drawPillLabelCentered(
+    ctx, entryLabel, centerX, entryLabelY, entryColor, opacity,
   )
 }
 
-function drawPillLabel(
+function drawPillLabelCentered(
   ctx: CanvasRenderingContext2D,
   text: string,
-  x: number,
+  centerX: number,
   y: number,
   color: string,
-  align: 'left' | 'right',
   opacity: number,
 ) {
   ctx.font = '10px ui-monospace, SFMono-Regular, monospace'
@@ -213,20 +288,20 @@ function drawPillLabel(
   const padY = 4
   const w = metrics.width + padX * 2
   const h = 16 + padY
-  const rectX = align === 'left' ? x : x - w
-  // Background pill (dark, untuk readability di chart)
+  const rectX = centerX - w / 2
+  // Background pill (dark untuk readability)
   ctx.fillStyle = `rgba(15, 23, 42, ${0.92 * opacity})`
   roundedRect(ctx, rectX, y - h / 2, w, h, 4)
   ctx.fill()
-  // Border tipis warna sesuai
+  // Border tipis
   ctx.strokeStyle = color + Math.round(255 * opacity).toString(16).padStart(2, '0')
   ctx.lineWidth = 1
   roundedRect(ctx, rectX, y - h / 2, w, h, 4)
   ctx.stroke()
   // Text
   ctx.fillStyle = color
-  ctx.textAlign = align === 'left' ? 'left' : 'right'
-  ctx.fillText(text, align === 'left' ? rectX + padX : rectX + w - padX, y)
+  ctx.textAlign = 'center'
+  ctx.fillText(text, centerX, y)
 }
 
 function roundedRect(

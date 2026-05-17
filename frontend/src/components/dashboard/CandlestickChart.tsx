@@ -30,6 +30,8 @@ import { ChartDrawingOverlay } from './ChartDrawingOverlay'
 import { PositionBoxOverlay, type PositionBox } from './PositionBoxOverlay'
 
 interface TradeOverlay {
+  /** Stable ID untuk dismiss tracking (e.g. active-TRADE123, pending-SIGNAL456) */
+  id?: string
   entry: number
   stopLoss: number
   takeProfit: number
@@ -42,8 +44,6 @@ interface TradeOverlay {
   riskAmount?: number
   potentialProfit?: number
   riskReward?: number
-  /** Anchor time supaya box mulai dari open candle (atau current candle untuk pending). */
-  anchorTime?: number
   /** Confidence 0-100 untuk pending setup label. */
   confidence?: number
 }
@@ -125,13 +125,34 @@ export function CandlestickChart({
   const [drawings, setDrawings] = useState<Drawing[]>([])
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null)
   const [snapEnabled, setSnapEnabled] = useState(false)
+  // ID position box yang user sudah dismiss (kembali muncul saat ID berbeda — trade/signal baru)
+  const [dismissedBoxIds, setDismissedBoxIds] = useState<Set<string>>(new Set())
   const [chartSize, setChartSize] = useState<{ width: number; height: number }>({ width: 0, height: 480 })
 
   // Load collapse state dari localStorage (persisted across reload)
   useEffect(() => {
     setIsCollapsed(localStorage.getItem('forexai.chartCollapsed') === 'true')
     setSnapEnabled(localStorage.getItem('forexai.snapToCandle') === 'true')
+    // Load dismissed position box IDs
+    try {
+      const raw = localStorage.getItem('forexai.dismissedBoxes')
+      if (raw) {
+        const arr: string[] = JSON.parse(raw)
+        if (Array.isArray(arr)) setDismissedBoxIds(new Set(arr))
+      }
+    } catch {/* corrupt — ignore */}
   }, [])
+
+  const handleDismissBox = (id: string) => {
+    setDismissedBoxIds((prev) => {
+      const next = new Set(prev)
+      next.add(id)
+      try {
+        localStorage.setItem('forexai.dismissedBoxes', JSON.stringify(Array.from(next)))
+      } catch {/* quota — ignore */}
+      return next
+    })
+  }
 
   const toggleSnap = () => {
     setSnapEnabled((prev) => {
@@ -263,14 +284,14 @@ export function CandlestickChart({
       color: '#fbbf24',
       lineWidth: 2,
       priceLineVisible: false,
-      lastValueVisible: true,
-      title: 'MA20',
+      lastValueVisible: false,  // hide right-side axis label — kurangi label clutter
+      title: 'MA20',             // tetap muncul di legend top-left chart
     })
     const ma50Series = mainChart.addSeries(LineSeries, {
       color: '#a78bfa',
       lineWidth: 2,
       priceLineVisible: false,
-      lastValueVisible: true,
+      lastValueVisible: false,  // hide right-side axis label
       title: 'MA50',
     })
 
@@ -504,7 +525,7 @@ export function CandlestickChart({
           color: 'rgba(34,197,94,0.5)',
           lineStyle: LineStyle.Dotted,
           lineWidth: 1,
-          axisLabelVisible: true,
+          axisLabelVisible: false,  // hide right-side label — kurangi clutter
           title: 'Support',
         }),
       )
@@ -514,7 +535,7 @@ export function CandlestickChart({
           color: 'rgba(239,68,68,0.5)',
           lineStyle: LineStyle.Dotted,
           lineWidth: 1,
-          axisLabelVisible: true,
+          axisLabelVisible: false,  // hide right-side label
           title: 'Resistance',
         }),
       )
@@ -571,10 +592,14 @@ export function CandlestickChart({
     return ((displayPrice - prevCandle.close) / prevCandle.close) * 100
   }, [displayPrice, prevCandle])
 
-  // Derive position boxes dari tradeOverlay untuk PositionBoxOverlay
+  // Derive position boxes dari tradeOverlay untuk PositionBoxOverlay.
+  // Skip box yang ID-nya sudah di-dismiss user (id berbeda = trade/signal baru = muncul lagi).
   const positionBoxes = useMemo<PositionBox[]>(() => {
     if (!tradeOverlay) return []
+    const id = tradeOverlay.id ?? `fallback-${tradeOverlay.direction}-${tradeOverlay.entry}-${tradeOverlay.stopLoss}`
+    if (dismissedBoxIds.has(id)) return []
     return [{
+      id,
       entry:            tradeOverlay.entry,
       stopLoss:         tradeOverlay.stopLoss,
       takeProfit:       tradeOverlay.takeProfit,
@@ -586,10 +611,9 @@ export function CandlestickChart({
       riskAmount:       tradeOverlay.riskAmount,
       potentialProfit:  tradeOverlay.potentialProfit,
       riskReward:       tradeOverlay.riskReward,
-      anchorTime:       tradeOverlay.anchorTime,
       confidence:       tradeOverlay.confidence,
     }]
-  }, [tradeOverlay])
+  }, [tradeOverlay, dismissedBoxIds])
 
   return (
     <Card className="bg-card/50">
@@ -680,6 +704,7 @@ export function CandlestickChart({
             boxes={positionBoxes}
             width={chartSize.width}
             height={chartSize.height}
+            onDismiss={handleDismissBox}
           />
           <ChartDrawingOverlay
             chart={mainChartRef.current}

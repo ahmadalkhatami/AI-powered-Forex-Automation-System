@@ -38,7 +38,6 @@ interface Props {
 // Saat user pan/zoom chart, box bergerak ikut candle — bukan fixed di viewport.
 const PRICE_SCALE_PAD = 60   // hindari overlap dengan price scale axis labels
 const BOX_WIDTH = 280
-const LABEL_HEIGHT = 20      // tinggi label pill untuk collision detection
 const CLOSE_BTN_SIZE = 18
 
 interface BoxLayout {
@@ -98,15 +97,19 @@ export function PositionBoxOverlay({ chart, series, boxes, width, height, onDism
       if (xStart < 0) xStart = 0
       const xEnd = xStart + BOX_WIDTH
 
-      // Collision avoidance: kalau SL/TP label terlalu dekat entry, shift menjauh
-      let slLabelY: number = slY
-      let tpLabelY: number = tpY
-      if (Math.abs(slY - entryY) < LABEL_HEIGHT) {
-        slLabelY = slY < entryY ? entryY - LABEL_HEIGHT : entryY + LABEL_HEIGHT
-      }
-      if (Math.abs(tpY - entryY) < LABEL_HEIGHT) {
-        tpLabelY = tpY < entryY ? entryY - LABEL_HEIGHT : entryY + LABEL_HEIGHT
-      }
+      // Label positioning: offset Stop label ke OUTSIDE box (jauh dari entry),
+      // dan Target label juga OUTSIDE box di sisi lain. Entry tetap on line.
+      // Cegah overlap di tight spacing (e.g. D1 wide price range).
+      const slOutsideOffset = 12
+      const tpOutsideOffset = 12
+      // Stop: kalau SL di atas entry → label di atas SL. Kalau di bawah → label di bawah SL.
+      let slLabelY: number = slY < entryY ? slY - slOutsideOffset : slY + slOutsideOffset
+      let tpLabelY: number = tpY < entryY ? tpY - tpOutsideOffset : tpY + tpOutsideOffset
+      // Clamp supaya label tidak keluar chart vertical bounds
+      if (slLabelY < 12) slLabelY = 12
+      if (slLabelY > height - 12) slLabelY = height - 12
+      if (tpLabelY < 12) tpLabelY = 12
+      if (tpLabelY > height - 12) tpLabelY = height - 12
 
       result.push({
         id: box.id,
@@ -118,7 +121,7 @@ export function PositionBoxOverlay({ chart, series, boxes, width, height, onDism
       })
     }
     return result
-  }, [boxes, chart, series, width])
+  }, [boxes, chart, series, width, height])
 
   const render = useCallback(() => {
     const canvas = canvasRef.current
@@ -243,80 +246,80 @@ function drawPositionBox(
   ctx.lineTo(xEnd, entryY)
   ctx.stroke()
 
-  // ── Labels (centered di dalam box width) ──────────────────────────────
+  // ── Labels (left-aligned, compact, di dalam box width) ────────────────
+  // Format kompak supaya tidak overflow box dan tidak overlap dengan price scale.
   ctx.font = '10px ui-monospace, SFMono-Regular, monospace'
   ctx.textBaseline = 'middle'
 
   const slPips = Math.round(Math.abs(box.stopLoss - box.entry) * 10000)
   const tpPips = Math.round(Math.abs(box.takeProfit - box.entry) * 10000)
-  const slPct = Math.abs(box.stopLoss - box.entry) / box.entry * 100
-  const tpPct = Math.abs(box.takeProfit - box.entry) / box.entry * 100
+  const labelX = xStart + 6  // small padding dari left edge box
+  const maxLabelWidth = xEnd - xStart - 12
 
-  const centerX = (xStart + xEnd) / 2
+  // SL label — compact: "SL 15p · $9.92"
+  const slLabel = box.riskAmount
+    ? `SL ${slPips}p · $${box.riskAmount.toFixed(2)}`
+    : `SL ${slPips}p`
+  drawPillLabelLeft(ctx, slLabel, labelX, slLabelY, '#ef4444', opacity, maxLabelWidth)
 
-  // SL label
-  drawPillLabelCentered(
-    ctx,
-    `Stop: ${slPips}p (${slPct.toFixed(2)}%)${box.riskAmount ? ` · $${box.riskAmount.toFixed(2)}` : ''}`,
-    centerX, slLabelY, '#ef4444', opacity,
-  )
+  // TP label — compact: "TP 22p · $15.40"
+  const tpLabel = box.potentialProfit
+    ? `TP ${tpPips}p · $${box.potentialProfit.toFixed(2)}`
+    : `TP ${tpPips}p`
+  drawPillLabelLeft(ctx, tpLabel, labelX, tpLabelY, '#22c55e', opacity, maxLabelWidth)
 
-  // TP label
-  drawPillLabelCentered(
-    ctx,
-    `Target: ${tpPips}p (${tpPct.toFixed(2)}%)${box.potentialProfit ? ` · $${box.potentialProfit.toFixed(2)}` : ''}`,
-    centerX, tpLabelY, '#22c55e', opacity,
-  )
-
-  // Entry label
-  const entryParts: string[] = []
+  // Entry label — compact: drop entry price (sudah ada di entry line), lot, RR
+  const entryParts: string[] = [box.direction]
   if (pending) {
-    entryParts.push('SETUP')
     if (box.confidence !== undefined) entryParts.push(`${box.confidence}%`)
   } else {
     if (box.livePnlUsd !== undefined && box.livePnlPips !== undefined) {
       const sign = box.livePnlUsd >= 0 ? '+' : ''
-      entryParts.push(`${sign}$${box.livePnlUsd.toFixed(2)} (${sign}${box.livePnlPips}p)`)
+      entryParts.push(`${sign}$${box.livePnlUsd.toFixed(2)}`)
     }
   }
-  if (box.lotSize) entryParts.push(`${box.lotSize.toFixed(2)} lot`)
-  if (box.riskReward) entryParts.push(`RR 1:${box.riskReward.toFixed(2)}`)
-  const entryLabel = `${box.direction} ${box.entry.toFixed(5)} · ${entryParts.join(' · ')}`
+  if (box.lotSize) entryParts.push(`${box.lotSize.toFixed(2)}L`)
+  if (box.riskReward) entryParts.push(`1:${box.riskReward.toFixed(2)}`)
+  const entryLabel = entryParts.join(' · ')
 
-  drawPillLabelCentered(
-    ctx, entryLabel, centerX, entryLabelY, entryColor, opacity,
-  )
+  drawPillLabelLeft(ctx, entryLabel, labelX, entryLabelY, entryColor, opacity, maxLabelWidth)
 }
 
-function drawPillLabelCentered(
+function drawPillLabelLeft(
   ctx: CanvasRenderingContext2D,
   text: string,
-  centerX: number,
+  leftX: number,
   y: number,
   color: string,
   opacity: number,
+  maxWidth: number,
 ) {
   ctx.font = '10px ui-monospace, SFMono-Regular, monospace'
   ctx.textBaseline = 'middle'
-  const metrics = ctx.measureText(text)
+  // Truncate text supaya fit dalam maxWidth
+  let displayText = text
+  let metrics = ctx.measureText(displayText)
   const padX = 6
   const padY = 4
+  while (metrics.width + padX * 2 > maxWidth && displayText.length > 4) {
+    displayText = displayText.slice(0, -2) + '…'
+    metrics = ctx.measureText(displayText)
+  }
   const w = metrics.width + padX * 2
   const h = 16 + padY
-  const rectX = centerX - w / 2
   // Background pill (dark untuk readability)
   ctx.fillStyle = `rgba(15, 23, 42, ${0.92 * opacity})`
-  roundedRect(ctx, rectX, y - h / 2, w, h, 4)
+  roundedRect(ctx, leftX, y - h / 2, w, h, 4)
   ctx.fill()
   // Border tipis
   ctx.strokeStyle = color + Math.round(255 * opacity).toString(16).padStart(2, '0')
   ctx.lineWidth = 1
-  roundedRect(ctx, rectX, y - h / 2, w, h, 4)
+  roundedRect(ctx, leftX, y - h / 2, w, h, 4)
   ctx.stroke()
   // Text
   ctx.fillStyle = color
-  ctx.textAlign = 'center'
-  ctx.fillText(text, centerX, y)
+  ctx.textAlign = 'left'
+  ctx.fillText(displayText, leftX + padX, y)
 }
 
 function roundedRect(

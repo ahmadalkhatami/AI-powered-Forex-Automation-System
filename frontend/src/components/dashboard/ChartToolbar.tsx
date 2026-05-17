@@ -1,6 +1,9 @@
 'use client'
 
-import { MousePointer2, Minus, TrendingUp, Square, Trash2, MoveUpRight, Type, Ruler } from 'lucide-react'
+import {
+  MousePointer2, Minus, TrendingUp, Square, Trash2, MoveUpRight, Type, Ruler,
+  GitFork, GitBranch, Magnet,
+} from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { DrawingType } from '@/lib/drawings'
 
@@ -13,16 +16,20 @@ interface ChartToolbarProps {
   onDeleteSelected?: () => void
   selectedId: string | null
   drawingCount: number
+  snapEnabled?: boolean
+  onToggleSnap?: () => void
 }
 
 const TOOLS: Array<{ mode: ToolMode; icon: typeof MousePointer2; label: string }> = [
-  { mode: 'cursor',    icon: MousePointer2, label: 'Cursor — pan/zoom + klik drawing untuk select' },
-  { mode: 'hline',     icon: Minus,         label: 'Horizontal line — klik level' },
-  { mode: 'trendline', icon: TrendingUp,    label: 'Trend line — klik 2 titik' },
-  { mode: 'ray',       icon: MoveUpRight,   label: 'Ray — klik 2 titik, extend infinity' },
-  { mode: 'rectangle', icon: Square,        label: 'Rectangle — klik diagonal' },
-  { mode: 'text',      icon: Type,          label: 'Text annotation — klik posisi, masukkan text' },
-  { mode: 'measure',   icon: Ruler,         label: 'Measure — klik 2 titik, lihat pip/% /waktu' },
+  { mode: 'cursor',          icon: MousePointer2, label: 'Cursor — pan/zoom + klik drawing untuk select' },
+  { mode: 'hline',           icon: Minus,         label: 'Horizontal line — klik level' },
+  { mode: 'trendline',       icon: TrendingUp,    label: 'Trend line — klik 2 titik' },
+  { mode: 'ray',             icon: MoveUpRight,   label: 'Ray — klik 2 titik, extend infinity' },
+  { mode: 'rectangle',       icon: Square,        label: 'Rectangle — klik diagonal' },
+  { mode: 'text',            icon: Type,          label: 'Text annotation — klik posisi, masukkan text' },
+  { mode: 'measure',         icon: Ruler,         label: 'Measure — klik 2 titik, lihat pip/% /waktu' },
+  { mode: 'fib-retracement', icon: GitFork,       label: 'Fib retracement — klik 2 titik (high → low)' },
+  { mode: 'fib-extension',   icon: GitBranch,     label: 'Fib extension — klik 3 titik (A → B → C)' },
 ]
 
 export function ChartToolbar({
@@ -32,6 +39,8 @@ export function ChartToolbar({
   onDeleteSelected,
   selectedId,
   drawingCount,
+  snapEnabled,
+  onToggleSnap,
 }: ChartToolbarProps) {
   return (
     <div className="flex items-center gap-1">
@@ -50,6 +59,22 @@ export function ChartToolbar({
           <Icon className="h-3.5 w-3.5" />
         </button>
       ))}
+      {onToggleSnap && (
+        <button
+          onClick={onToggleSnap}
+          title={snapEnabled
+            ? 'Magnet ON — klik akan snap ke high/low candle terdekat'
+            : 'Magnet OFF — klik free di posisi mouse'}
+          className={cn(
+            'p-1.5 rounded border transition-colors ml-1',
+            snapEnabled
+              ? 'bg-amber-500/15 border-amber-500/40 text-amber-500'
+              : 'border-border/40 text-muted-foreground hover:text-foreground hover:border-border',
+          )}
+        >
+          <Magnet className="h-3.5 w-3.5" />
+        </button>
+      )}
       {selectedId && onDeleteSelected && (
         <button
           onClick={onDeleteSelected}

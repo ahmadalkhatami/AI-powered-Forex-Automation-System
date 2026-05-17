@@ -7,9 +7,13 @@ import {
   type DrawingPoint,
   type DrawingType,
   DEFAULT_STYLES,
+  FIB_RETRACEMENT_LEVELS,
+  FIB_EXTENSION_LEVELS,
   hitTest,
   makeId,
+  snapToCandle as snapPoint,
 } from '@/lib/drawings'
+import type { CandleBar } from '@/lib/types'
 import type { ToolMode } from './ChartToolbar'
 
 interface Props {
@@ -22,6 +26,8 @@ interface Props {
   onSelectedIdChange: (id: string | null) => void
   width: number
   height: number
+  candles: CandleBar[]
+  snapEnabled: boolean
 }
 
 /**
@@ -45,10 +51,12 @@ export function ChartDrawingOverlay({
   onSelectedIdChange,
   width,
   height,
+  candles,
+  snapEnabled,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  // Drawing-in-progress: first point sudah ditaruh, menunggu point berikutnya
-  const [pendingPoint, setPendingPoint] = useState<DrawingPoint | null>(null)
+  // Drawing-in-progress: untuk 2-click tool: [start]. Untuk 3-click (fib-extension): [a, b]
+  const [pendingPoints, setPendingPoints] = useState<DrawingPoint[]>([])
   // Pixel-tracking mouse untuk preview saat drawing in-progress
   const [hoverPixel, setHoverPixel] = useState<{ x: number; y: number } | null>(null)
   // Apakah kursor sedang di atas drawing existing (cursor mode only)
@@ -98,38 +106,78 @@ export function ChartDrawingOverlay({
     }
 
     // Preview drawing-in-progress
-    if (pendingPoint && hoverPixel) {
-      const start = dataToPixel(pendingPoint)
-      if (start) {
+    if (pendingPoints.length > 0 && hoverPixel) {
+      const first = dataToPixel(pendingPoints[0])
+      if (first) {
         const previewStyle = DEFAULT_STYLES[activeTool as DrawingType] || { color: '#888', width: 1 }
         ctx.strokeStyle = previewStyle.color
         ctx.lineWidth = previewStyle.width
         ctx.setLineDash([4, 4])
         if (activeTool === 'trendline') {
           ctx.beginPath()
-          ctx.moveTo(start.x, start.y)
+          ctx.moveTo(first.x, first.y)
           ctx.lineTo(hoverPixel.x, hoverPixel.y)
           ctx.stroke()
         } else if (activeTool === 'ray') {
-          const end = extendRay(start, hoverPixel, width, height)
+          const end = extendRay(first, hoverPixel, width, height)
           ctx.beginPath()
-          ctx.moveTo(start.x, start.y)
+          ctx.moveTo(first.x, first.y)
           ctx.lineTo(end.x, end.y)
           ctx.stroke()
         } else if (activeTool === 'rectangle') {
           ctx.strokeRect(
-            Math.min(start.x, hoverPixel.x),
-            Math.min(start.y, hoverPixel.y),
-            Math.abs(hoverPixel.x - start.x),
-            Math.abs(hoverPixel.y - start.y),
+            Math.min(first.x, hoverPixel.x),
+            Math.min(first.y, hoverPixel.y),
+            Math.abs(hoverPixel.x - first.x),
+            Math.abs(hoverPixel.y - first.y),
           )
         } else if (activeTool === 'measure') {
-          drawMeasure(ctx, start, hoverPixel, pendingPoint, pixelToData(hoverPixel.x, hoverPixel.y))
+          drawMeasure(ctx, first, hoverPixel, pendingPoints[0], pixelToData(hoverPixel.x, hoverPixel.y))
+        } else if (activeTool === 'fib-retracement') {
+          const hoverData = pixelToData(hoverPixel.x, hoverPixel.y)
+          if (hoverData) {
+            drawFibRetracement(
+              ctx,
+              { ...pendingPoints[0] },
+              hoverData,
+              dataToPixel,
+              width,
+              DEFAULT_STYLES['fib-retracement'].color,
+            )
+          }
+        } else if (activeTool === 'fib-extension' && pendingPoints.length >= 1) {
+          // Pendrop ke titik A (1 point) atau A+B (2 points)
+          ctx.beginPath()
+          ctx.moveTo(first.x, first.y)
+          ctx.lineTo(hoverPixel.x, hoverPixel.y)
+          ctx.stroke()
+          if (pendingPoints.length === 2) {
+            const second = dataToPixel(pendingPoints[1])
+            if (second) {
+              ctx.beginPath()
+              ctx.moveTo(second.x, second.y)
+              ctx.lineTo(hoverPixel.x, hoverPixel.y)
+              ctx.stroke()
+              // Preview level projection
+              const hoverData = pixelToData(hoverPixel.x, hoverPixel.y)
+              if (hoverData) {
+                drawFibExtension(
+                  ctx,
+                  pendingPoints[0],
+                  pendingPoints[1],
+                  hoverData,
+                  dataToPixel,
+                  width,
+                  DEFAULT_STYLES['fib-extension'].color,
+                )
+              }
+            }
+          }
         }
         ctx.setLineDash([])
       }
     }
-  }, [drawings, dataToPixel, pixelToData, width, height, selectedId, pendingPoint, hoverPixel, activeTool])
+  }, [drawings, dataToPixel, pixelToData, width, height, selectedId, pendingPoints, hoverPixel, activeTool])
 
   // Subscribe ke visible range change untuk redraw saat zoom/pan
   useEffect(() => {
@@ -181,71 +229,89 @@ export function ChartDrawingOverlay({
         return
       }
 
-      const dataPoint = pixelToData(px, py)
+      let dataPoint = pixelToData(px, py)
       if (!dataPoint) return
+      // Magnet mode: snap ke high/low candle terdekat
+      if (snapEnabled && candles.length > 0) {
+        dataPoint = snapPoint(dataPoint, candles)
+      }
 
       // 1-click tools
       if (activeTool === 'hline') {
-        addDrawing({
+        onDrawingsChange([...drawings, {
           id: makeId(),
           type: 'hline',
           points: [dataPoint],
           style: { ...DEFAULT_STYLES.hline },
           createdAt: new Date().toISOString(),
-        })
+        }])
         return
       }
 
       if (activeTool === 'text') {
         const text = window.prompt('Annotation text:', '')?.trim()
         if (!text) return
-        addDrawing({
+        onDrawingsChange([...drawings, {
           id: makeId(),
           type: 'text',
           points: [dataPoint],
           style: { ...DEFAULT_STYLES.text },
           createdAt: new Date().toISOString(),
           text,
-        })
+        }])
         return
       }
 
-      // 2-click tools: trendline, rectangle, ray, measure
-      if (!pendingPoint) {
-        setPendingPoint(dataPoint)
+      // 3-click tool: fib-extension (A, B, C)
+      if (activeTool === 'fib-extension') {
+        if (pendingPoints.length < 2) {
+          setPendingPoints([...pendingPoints, dataPoint])
+        } else {
+          onDrawingsChange([...drawings, {
+            id: makeId(),
+            type: 'fib-extension',
+            points: [...pendingPoints, dataPoint],
+            style: { ...DEFAULT_STYLES['fib-extension'] },
+            createdAt: new Date().toISOString(),
+          }])
+          setPendingPoints([])
+          setHoverPixel(null)
+        }
+        return
+      }
+
+      // 2-click tools: trendline, rectangle, ray, measure, fib-retracement
+      if (pendingPoints.length === 0) {
+        setPendingPoints([dataPoint])
       } else {
-        addDrawing({
+        onDrawingsChange([...drawings, {
           id: makeId(),
           type: activeTool as DrawingType,
-          points: [pendingPoint, dataPoint],
+          points: [pendingPoints[0], dataPoint],
           style: { ...DEFAULT_STYLES[activeTool as DrawingType] },
           createdAt: new Date().toISOString(),
-        })
-        setPendingPoint(null)
+        }])
+        setPendingPoints([])
         setHoverPixel(null)
       }
     },
-    [activeTool, drawings, dataToPixel, pixelToData, pendingPoint, onSelectedIdChange],
+    [activeTool, drawings, dataToPixel, pixelToData, pendingPoints, onSelectedIdChange, onDrawingsChange, snapEnabled, candles],
   )
-
-  const addDrawing = (drawing: Drawing) => {
-    onDrawingsChange([...drawings, drawing])
-  }
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (!pendingPoint) return
+      if (pendingPoints.length === 0) return
       const rect = (e.target as HTMLCanvasElement).getBoundingClientRect()
       setHoverPixel({ x: e.clientX - rect.left, y: e.clientY - rect.top })
     },
-    [pendingPoint],
+    [pendingPoints],
   )
 
   // Cancel drawing-in-progress on ESC
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setPendingPoint(null)
+        setPendingPoints([])
         setHoverPixel(null)
       }
     }
@@ -255,7 +321,7 @@ export function ChartDrawingOverlay({
 
   // Reset pending kalau ganti tool
   useEffect(() => {
-    setPendingPoint(null)
+    setPendingPoints([])
     setHoverPixel(null)
   }, [activeTool])
 
@@ -445,6 +511,11 @@ function drawShape(
     const b = dataToPixel(d.points[1])
     if (!a || !b) return
     drawMeasure(ctx, a, b, d.points[0], d.points[1])
+  } else if (d.type === 'fib-retracement') {
+    drawFibRetracement(ctx, d.points[0], d.points[1], dataToPixel, canvasWidth, d.style.color)
+  } else if (d.type === 'fib-extension') {
+    if (d.points.length < 3) return
+    drawFibExtension(ctx, d.points[0], d.points[1], d.points[2], dataToPixel, canvasWidth, d.style.color)
   }
 
   // Selection highlight: titik kecil di endpoints
@@ -461,5 +532,114 @@ function drawShape(
       ctx.fill()
       ctx.stroke()
     }
+  }
+}
+
+/**
+ * Render Fibonacci retracement: 7 horizontal lines antara anchor A dan B,
+ * tiap level diberi label price + percentage.
+ */
+function drawFibRetracement(
+  ctx: CanvasRenderingContext2D,
+  a: DrawingPoint,
+  b: DrawingPoint,
+  dataToPixel: (p: DrawingPoint) => { x: number; y: number } | null,
+  canvasWidth: number,
+  baseColor: string,
+) {
+  const pa = dataToPixel(a)
+  const pb = dataToPixel(b)
+  if (!pa || !pb) return
+  const x1 = Math.min(pa.x, pb.x)
+
+  ctx.setLineDash([])
+  ctx.font = '10px ui-monospace, SFMono-Regular, monospace'
+  ctx.textBaseline = 'middle'
+
+  for (const lv of FIB_RETRACEMENT_LEVELS) {
+    const y = pa.y + (pb.y - pa.y) * lv
+    const price = a.price + (b.price - a.price) * lv
+    // Line stroke
+    ctx.strokeStyle = baseColor + (lv === 0.5 ? 'ee' : lv === 0.618 || lv === 0.382 ? 'cc' : '88')
+    ctx.lineWidth = lv === 0 || lv === 1 ? 1.5 : 1
+    ctx.beginPath()
+    ctx.moveTo(x1, y)
+    ctx.lineTo(canvasWidth - 4, y)
+    ctx.stroke()
+    // Label kiri (level %)
+    ctx.fillStyle = baseColor
+    ctx.textAlign = 'left'
+    ctx.fillText(`${(lv * 100).toFixed(1)}%`, x1 + 4, y - 6)
+    // Label kanan (price)
+    ctx.textAlign = 'right'
+    ctx.fillText(price.toFixed(5), canvasWidth - 6, y - 6)
+  }
+
+  // Connecting trendline antara A dan B (orientation)
+  ctx.setLineDash([3, 3])
+  ctx.strokeStyle = baseColor + '66'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(pa.x, pa.y)
+  ctx.lineTo(pb.x, pb.y)
+  ctx.stroke()
+  ctx.setLineDash([])
+}
+
+/**
+ * Render Fibonacci extension/projection: anchor di A→B (swing), projection
+ * di-attach ke C. Level standar 1.272, 1.618, 2.0, 2.618.
+ */
+function drawFibExtension(
+  ctx: CanvasRenderingContext2D,
+  a: DrawingPoint,
+  b: DrawingPoint,
+  c: DrawingPoint,
+  dataToPixel: (p: DrawingPoint) => { x: number; y: number } | null,
+  canvasWidth: number,
+  baseColor: string,
+) {
+  const pa = dataToPixel(a)
+  const pb = dataToPixel(b)
+  const pc = dataToPixel(c)
+  if (!pa || !pb || !pc) return
+
+  const aPrice = a.price
+  const bPrice = b.price
+  const cPrice = c.price
+  const range = bPrice - aPrice
+  if (range === 0) return
+
+  // Trendline A→B→C (orientation)
+  ctx.setLineDash([3, 3])
+  ctx.strokeStyle = baseColor + '66'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.moveTo(pa.x, pa.y)
+  ctx.lineTo(pb.x, pb.y)
+  ctx.lineTo(pc.x, pc.y)
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  ctx.font = '10px ui-monospace, SFMono-Regular, monospace'
+  ctx.textBaseline = 'middle'
+
+  for (const lv of FIB_EXTENSION_LEVELS) {
+    const projPrice = cPrice + range * lv
+    // Pixel: pa.y untuk price=aPrice, pb.y untuk price=bPrice (linear interp)
+    const projY = pc.y + (projPrice - cPrice) / range * (pb.y - pa.y)
+
+    ctx.strokeStyle = baseColor + (lv === 1.618 || lv === 1 ? 'ee' : '88')
+    ctx.lineWidth = lv === 1.618 ? 1.5 : 1
+    ctx.beginPath()
+    ctx.moveTo(pc.x, projY)
+    ctx.lineTo(canvasWidth - 4, projY)
+    ctx.stroke()
+
+    ctx.fillStyle = baseColor
+    ctx.textAlign = 'left'
+    ctx.fillText(`${lv.toFixed(3)}`, pc.x + 4, projY - 6)
+    ctx.textAlign = 'right'
+    ctx.fillText(projPrice.toFixed(5), canvasWidth - 6, projY - 6)
   }
 }

@@ -113,12 +113,22 @@ export function CandlestickChart({
   const [activeTool, setActiveTool] = useState<ToolMode>('cursor')
   const [drawings, setDrawings] = useState<Drawing[]>([])
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null)
+  const [snapEnabled, setSnapEnabled] = useState(false)
   const [chartSize, setChartSize] = useState<{ width: number; height: number }>({ width: 0, height: 480 })
 
   // Load collapse state dari localStorage (persisted across reload)
   useEffect(() => {
     setIsCollapsed(localStorage.getItem('forexai.chartCollapsed') === 'true')
+    setSnapEnabled(localStorage.getItem('forexai.snapToCandle') === 'true')
   }, [])
+
+  const toggleSnap = () => {
+    setSnapEnabled((prev) => {
+      const next = !prev
+      localStorage.setItem('forexai.snapToCandle', String(next))
+      return next
+    })
+  }
 
   // Load drawings saat pair/timeframe berubah
   useEffect(() => {
@@ -589,6 +599,8 @@ export function CandlestickChart({
                   onDeleteSelected={handleDeleteSelected}
                   selectedId={selectedDrawingId}
                   drawingCount={drawings.length}
+                  snapEnabled={snapEnabled}
+                  onToggleSnap={toggleSnap}
                 />
               </div>
             )}
@@ -639,6 +651,8 @@ export function CandlestickChart({
             onSelectedIdChange={setSelectedDrawingId}
             width={chartSize.width}
             height={chartSize.height}
+            candles={candles}
+            snapEnabled={snapEnabled}
           />
         </div>
         {candles.length === 0 && (

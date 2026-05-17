@@ -245,21 +245,24 @@ function drawPositionBox(
 ) {
   const { xStart, xEnd, slY, tpY, entryY, slLabelY, tpLabelY, entryLabelY } = layout
   const pending = box.status === 'pending'
-  const opacity = pending ? 0.55 : 1
+  // Zone (fill + border) tetap faded untuk pending — visual indicator only
+  const zoneOpacity = pending ? 0.55 : 1
+  // Label (pill bg + border + text) lebih pekat supaya tetap kebaca di dark bg
+  const labelOpacity = pending ? 0.85 : 1
   const dash: number[] = pending ? [5, 4] : []
 
   // ── Red zone (Entry ↔ SL) ─────────────────────────────────────────────
-  ctx.fillStyle = `rgba(239, 68, 68, ${0.12 * opacity})`
+  ctx.fillStyle = `rgba(239, 68, 68, ${0.12 * zoneOpacity})`
   ctx.fillRect(xStart, Math.min(entryY, slY), xEnd - xStart, Math.abs(slY - entryY))
-  ctx.strokeStyle = `rgba(239, 68, 68, ${0.7 * opacity})`
+  ctx.strokeStyle = `rgba(239, 68, 68, ${0.7 * zoneOpacity})`
   ctx.lineWidth = 1
   ctx.setLineDash(dash)
   ctx.strokeRect(xStart, Math.min(entryY, slY), xEnd - xStart, Math.abs(slY - entryY))
 
   // ── Green zone (Entry ↔ TP) ───────────────────────────────────────────
-  ctx.fillStyle = `rgba(34, 197, 94, ${0.12 * opacity})`
+  ctx.fillStyle = `rgba(34, 197, 94, ${0.12 * zoneOpacity})`
   ctx.fillRect(xStart, Math.min(entryY, tpY), xEnd - xStart, Math.abs(tpY - entryY))
-  ctx.strokeStyle = `rgba(34, 197, 94, ${0.7 * opacity})`
+  ctx.strokeStyle = `rgba(34, 197, 94, ${0.7 * zoneOpacity})`
   ctx.strokeRect(xStart, Math.min(entryY, tpY), xEnd - xStart, Math.abs(tpY - entryY))
 
   // ── Entry line (solid) ────────────────────────────────────────────────
@@ -272,27 +275,29 @@ function drawPositionBox(
   ctx.lineTo(xEnd, entryY)
   ctx.stroke()
 
-  // ── Labels (left-aligned, compact, di dalam box width) ────────────────
-  // Format kompak supaya tidak overflow box dan tidak overlap dengan price scale.
+  // ── Labels (right-aligned di dalam box, jauh dari candle area) ────────
+  // Label posisi di KANAN box (dekat tombol close), supaya tidak menutupi
+  // candle yang ada di sisi kiri box.
   ctx.font = '10px ui-monospace, SFMono-Regular, monospace'
   ctx.textBaseline = 'middle'
 
   const slPips = Math.round(Math.abs(box.stopLoss - box.entry) * 10000)
   const tpPips = Math.round(Math.abs(box.takeProfit - box.entry) * 10000)
-  const labelX = xStart + 6  // small padding dari left edge box
-  const maxLabelWidth = xEnd - xStart - 12
+  // Right edge anchor (offset 24px untuk hindari overlap dengan tombol close X)
+  const rightX = xEnd - 24
+  const maxLabelWidth = xEnd - xStart - 30
 
   // SL label — compact: "SL 15p · $9.92"
   const slLabel = box.riskAmount
     ? `SL ${slPips}p · $${box.riskAmount.toFixed(2)}`
     : `SL ${slPips}p`
-  drawPillLabelLeft(ctx, slLabel, labelX, slLabelY, '#ef4444', opacity, maxLabelWidth)
+  drawPillLabelRight(ctx, slLabel, rightX, slLabelY, '#ef4444', labelOpacity, maxLabelWidth)
 
   // TP label — compact: "TP 22p · $15.40"
   const tpLabel = box.potentialProfit
     ? `TP ${tpPips}p · $${box.potentialProfit.toFixed(2)}`
     : `TP ${tpPips}p`
-  drawPillLabelLeft(ctx, tpLabel, labelX, tpLabelY, '#22c55e', opacity, maxLabelWidth)
+  drawPillLabelRight(ctx, tpLabel, rightX, tpLabelY, '#22c55e', labelOpacity, maxLabelWidth)
 
   // Entry label — compact: drop entry price (sudah ada di entry line), lot, RR
   const entryParts: string[] = [box.direction]
@@ -308,13 +313,13 @@ function drawPositionBox(
   if (box.riskReward) entryParts.push(`1:${box.riskReward.toFixed(2)}`)
   const entryLabel = entryParts.join(' · ')
 
-  drawPillLabelLeft(ctx, entryLabel, labelX, entryLabelY, entryColor, opacity, maxLabelWidth)
+  drawPillLabelRight(ctx, entryLabel, rightX, entryLabelY, entryColor, labelOpacity, maxLabelWidth)
 }
 
-function drawPillLabelLeft(
+function drawPillLabelRight(
   ctx: CanvasRenderingContext2D,
   text: string,
-  leftX: number,
+  rightX: number,
   y: number,
   color: string,
   opacity: number,
@@ -333,6 +338,7 @@ function drawPillLabelLeft(
   }
   const w = metrics.width + padX * 2
   const h = 16 + padY
+  const leftX = rightX - w
   // Background pill (dark untuk readability)
   ctx.fillStyle = `rgba(15, 23, 42, ${0.92 * opacity})`
   roundedRect(ctx, leftX, y - h / 2, w, h, 4)
@@ -342,10 +348,10 @@ function drawPillLabelLeft(
   ctx.lineWidth = 1
   roundedRect(ctx, leftX, y - h / 2, w, h, 4)
   ctx.stroke()
-  // Text
+  // Text — full opacity supaya tetap terbaca
   ctx.fillStyle = color
-  ctx.textAlign = 'left'
-  ctx.fillText(displayText, leftX + padX, y)
+  ctx.textAlign = 'right'
+  ctx.fillText(displayText, rightX - padX, y)
 }
 
 function roundedRect(

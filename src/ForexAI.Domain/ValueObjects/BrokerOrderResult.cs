@@ -9,14 +9,15 @@ public record BrokerOrderResult(
     string? ExternalId,        // "MIFX-{ticket}" kalau success
     string  StatusReason,      // "FILLED" | "FAILED" | "TIMEOUT" | "DISCONNECTED"
     int     BrokerRetcode = 0, // MT5 retcode (10016 = invalid stops, dll)
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    decimal ExecutedPrice = 0m  // Fill price actual dari broker — slippage tracking
 )
 {
     public static BrokerOrderResult Disconnected() =>
         new(false, null, "DISCONNECTED", 0, "MIFX EA tidak terkoneksi");
 
-    public static BrokerOrderResult Filled(string externalId) =>
-        new(true, externalId, "FILLED");
+    public static BrokerOrderResult Filled(string externalId, decimal executedPrice = 0m) =>
+        new(true, externalId, "FILLED", 0, null, executedPrice);
 
     public static BrokerOrderResult Failed(int retcode, string? message = null) =>
         new(false, null, "FAILED", retcode, message ?? DescribeRetcode(retcode));

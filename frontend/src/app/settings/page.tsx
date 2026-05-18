@@ -26,6 +26,7 @@ const FIELDS: FieldDef[] = [
   { key: 'nanoMaxDailyLossUsd',  label: 'Nano Max Daily Loss',  description: 'Auto-halt kalau realized loss hari ini melewati nilai ini ($)', unit: '$', step: 1, min: 1, max: 50, type: 'number' },
   { key: 'nanoEquityFloorUsd',   label: 'Nano Equity Floor',    description: 'Permanent halt kalau equity drop ke level ini ($)', unit: '$', step: 1, min: 5, max: 100, type: 'number' },
   { key: 'maxWeeklyDrawdownPct', label: 'Weekly DD Cap',        description: 'Halt kalau realized loss 7 hari > N% equity', unit: '%', step: 0.005, min: 0.01, max: 0.20, type: 'percent' },
+  { key: 'maxTradesPerDay',      label: 'Max Trades/Day',       description: 'Block execute kalau hari ini sudah open N trade — overtrade prevention untuk M15 scalping', unit: 'trades', step: 1, min: 1, max: 50, type: 'number' },
 ]
 
 export default function SettingsPage() {
@@ -110,7 +111,6 @@ export default function SettingsPage() {
           const currentValue = draft[f.key] as number
           const orig = config[f.key] as number
           const changed = currentValue !== orig
-          const displayValue = f.type === 'percent' ? (currentValue * 100).toFixed(1) : currentValue
           const displayUnit = f.type === 'percent' ? '%' : f.unit
 
           return (

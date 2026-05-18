@@ -577,7 +577,10 @@ export default function DashboardPage() {
     if (autoApprovedSignalIdRef.current === rawSignal.id) return
     if (riskValidation.decision === 'NO-GO') return
     if (rawSignal.signal !== 'BUY' && rawSignal.signal !== 'SELL') return
-    if (rawSignal.confidenceScore < 0.70) return
+    // Counter-D1 setup butuh confidence lebih tinggi (sebelumnya hard veto, sekarang modifier)
+    const isCounterD1 = rawSignal.warnings?.some((w) => w.startsWith('HTF MODIFIER:')) ?? false
+    const confThreshold = isCounterD1 ? 0.75 : 0.70
+    if (rawSignal.confidenceScore < confThreshold) return
     if (pageState === 'processing' || pageState === 'monitoring') return
     if (positions.some((p) => p.status === 'ACTIVE')) return
 

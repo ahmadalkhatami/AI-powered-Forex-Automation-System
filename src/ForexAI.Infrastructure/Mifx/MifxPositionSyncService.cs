@@ -147,7 +147,7 @@ public class MifxPositionSyncService
                             "Trailing stop fire: {Id} peakR={Peak:F2} currentR={Cur:F2} (give back ≥{Give:F1}R) — close",
                             local.TradeId, peakR, currentR, trailGiveBack);
                         _closingInProgress.Add(local.TradeId);
-                        _ = _broker.ClosePositionAsync(local);
+                        FireCloseWithLogging(local);
                     }
                     // Breakeven trigger — setelah peak ≥ beTrigger, close kalau price reverse ke entry atau lebih buruk
                     else if (peakR >= beTrigger && currentR <= 0m)
@@ -156,7 +156,7 @@ public class MifxPositionSyncService
                             "Breakeven fire: {Id} peakR={Peak:F2} currentR={Cur:F2} — price reverse ke entry, close",
                             local.TradeId, peakR, currentR);
                         _closingInProgress.Add(local.TradeId);
-                        _ = _broker.ClosePositionAsync(local);
+                        FireCloseWithLogging(local);
                     }
                 }
 
@@ -171,8 +171,7 @@ public class MifxPositionSyncService
                             "Time stop fire: {Id} (TF={Tf}) held {Age:F0} min ≥ {Max} min — close otomatis",
                             local.TradeId, local.Timeframe ?? "?", ageMinutes, timeStopMin);
                         _closingInProgress.Add(local.TradeId);
-                        // Fire-and-forget close — actual close akan di-detect di sync berikutnya
-                        _ = _broker.ClosePositionAsync(local);
+                        FireCloseWithLogging(local);
                     }
                 }
             }
@@ -216,6 +215,43 @@ public class MifxPositionSyncService
         {
             _peakR.Remove(staleId);
             _closingInProgress.Remove(staleId);
+        }
+    }
+
+    /// <summary>
+    /// Wrapper untuk async close ke broker. Tidak block sync loop, tapi LOG kalau failed
+    /// (sebelumnya fire-and-forget tanpa logging = audit gap).
+    /// </summary>
+    private void FireCloseWithLogging(Domain.Entities.TradePosition position)
+    {
+        _ = HandleCloseAsync(position);
+    }
+
+    private async Task HandleCloseAsync(Domain.Entities.TradePosition position)
+    {
+        try
+        {
+            var result = await _broker.ClosePositionAsync(position);
+            if (!result.IsSuccess)
+            {
+                _logger.LogError(
+                    "Close rejected by broker for {Id}: {Reason}",
+                    position.TradeId, result.ErrorMessage ?? "unknown");
+                lock (_closingInProgress) _closingInProgress.Remove(position.TradeId);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Close accepted for {Id}: executed @ {Price:F5}",
+                    position.TradeId, result.ExecutedPrice);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Close failed for {Id} ({Pair} {Dir}): {Err}",
+                position.TradeId, position.Pair, position.Direction, ex.Message);
+            lock (_closingInProgress) _closingInProgress.Remove(position.TradeId);
         }
     }
 }

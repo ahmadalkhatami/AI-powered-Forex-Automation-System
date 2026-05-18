@@ -38,6 +38,10 @@ public class SystemStateService : ISystemStateService
     // Protects against multi-day catastrophic losing streak yang lolos daily cap.
     public decimal MaxWeeklyDrawdownPct { get; private set; } = 0.05m;  // 5%
 
+    // Max trades per day — overtrade prevention untuk M15 scalping.
+    // Block execute kalau hari ini sudah open N posisi (counted by openedAt UTC date).
+    public int MaxTradesPerDay { get; private set; } = 7;
+
     private readonly IModeService _mode;
     private readonly object _lock = new();
 
@@ -67,6 +71,7 @@ public class SystemStateService : ISystemStateService
             IsHalted = false; HaltReason = null; HaltedAt = null;
             LastLossDirection = null; LastLossAt = null;
             MaxSpreadPips = 2.5m; MaxConsecutiveLosses = 3; MaxHoldingMinutes = 360; CooldownMinutes = 30;
+            MaxTradesPerDay = 7;
         }
         Load();
     }
@@ -115,7 +120,8 @@ public class SystemStateService : ISystemStateService
         int? cooldownMinutes = null,
         decimal? nanoMaxDailyLossUsd = null,
         decimal? nanoEquityFloorUsd = null,
-        decimal? maxWeeklyDrawdownPct = null)
+        decimal? maxWeeklyDrawdownPct = null,
+        int? maxTradesPerDay = null)
     {
         lock (_lock)
         {
@@ -126,6 +132,7 @@ public class SystemStateService : ISystemStateService
             if (nanoMaxDailyLossUsd   is decimal m5 && m5 > 0m) NanoMaxDailyLossUsd   = m5;
             if (nanoEquityFloorUsd    is decimal m6 && m6 > 0m) NanoEquityFloorUsd    = m6;
             if (maxWeeklyDrawdownPct  is decimal m7 && m7 > 0m && m7 <= 0.5m) MaxWeeklyDrawdownPct = m7;
+            if (maxTradesPerDay       is int     m8 && m8 > 0 && m8 <= 50) MaxTradesPerDay = m8;
             Save_NoLock();
         }
     }
@@ -154,7 +161,8 @@ public class SystemStateService : ISystemStateService
         int CooldownMinutes = 30,
         decimal NanoMaxDailyLossUsd = 5m,
         decimal NanoEquityFloorUsd  = 20m,
-        decimal MaxWeeklyDrawdownPct = 0.05m);
+        decimal MaxWeeklyDrawdownPct = 0.05m,
+        int MaxTradesPerDay = 7);
 
     private void Save_NoLock()
     {
@@ -164,7 +172,8 @@ public class SystemStateService : ISystemStateService
                 IsHalted, HaltReason, HaltedAt,
                 MaxSpreadPips, MaxConsecutiveLosses, MaxHoldingMinutes,
                 LastLossDirection, LastLossAt, CooldownMinutes,
-                NanoMaxDailyLossUsd, NanoEquityFloorUsd, MaxWeeklyDrawdownPct);
+                NanoMaxDailyLossUsd, NanoEquityFloorUsd, MaxWeeklyDrawdownPct,
+                MaxTradesPerDay);
             var json = JsonSerializer.Serialize(snap, new JsonSerializerOptions { WriteIndented = true });
             var path = PersistPath;
             var tmp  = path + ".tmp";
@@ -196,6 +205,7 @@ public class SystemStateService : ISystemStateService
                 NanoMaxDailyLossUsd  = snap.NanoMaxDailyLossUsd > 0m ? snap.NanoMaxDailyLossUsd : 5m;
                 NanoEquityFloorUsd   = snap.NanoEquityFloorUsd  > 0m ? snap.NanoEquityFloorUsd  : 20m;
                 MaxWeeklyDrawdownPct = snap.MaxWeeklyDrawdownPct > 0m ? snap.MaxWeeklyDrawdownPct : 0.05m;
+                MaxTradesPerDay      = snap.MaxTradesPerDay > 0 ? snap.MaxTradesPerDay : 7;
             }
         }
         catch { /* corrupt — ignore */ }

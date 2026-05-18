@@ -176,6 +176,25 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
             return skipped;
         }
 
+        // Hard limit: max trades per day (overtrade prevention untuk M15 scalping)
+        if (_systemState.MaxTradesPerDay > 0)
+        {
+            var todayUtc = DateTimeOffset.UtcNow.Date;
+            var allPositions = await _positions.GetAllAsync();
+            int todayCount = allPositions.Count(p =>
+                p.OpenedAt.HasValue &&
+                p.OpenedAt.Value.UtcDateTime.Date == todayUtc &&
+                p.Status != TradeStatus.SKIPPED);
+            if (todayCount >= _systemState.MaxTradesPerDay)
+            {
+                var msg = $"Max trades/day reached ({todayCount}/{_systemState.MaxTradesPerDay}) — overtrade prevention";
+                _logger.LogWarning("Trade skipped: {Reason}", msg);
+                var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
+                await _positions.SaveAsync(skipped);
+                return skipped;
+            }
+        }
+
         // Hard limit: max drawdown 10%
         var drawdown = peakEquity > 0 ? (peakEquity - currentEquity) / peakEquity : 0m;
         if (drawdown >= MaxDrawdownPct)
@@ -352,10 +371,19 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
                 externalTradeId: brokerResult.ExternalId,
                 timeframe: signal.Timeframe);
 
+            // Slippage tracking — entry actual vs requested. Negative = adverse fill.
+            decimal slippagePips = 0m;
+            if (brokerResult.ExecutedPrice > 0m)
+            {
+                decimal delta = signal.Signal == SignalDirection.BUY
+                    ? brokerResult.ExecutedPrice - p.Entry  // higher buy = worse
+                    : p.Entry - brokerResult.ExecutedPrice; // lower sell = worse
+                slippagePips = Math.Round(delta / 0.0001m, 1);
+            }
             _logger.LogInformation(
-                "Trade OPEN [MIFX_DEMO] {TradeId} (ext:{ExternalId}) — {Direction} {Pair} @ {Entry}, SL {SL}, TP {TP}, lot {Lot}",
+                "Trade OPEN [MIFX_DEMO] {TradeId} (ext:{ExternalId}) — {Direction} {Pair} requested@{Entry:F5} filled@{Filled:F5} slippage={Slippage:F1}p, SL {SL:F5}, TP {TP:F5}, lot {Lot}",
                 tradeId, brokerResult.ExternalId, signal.Signal, signal.Pair,
-                p.Entry, p.StopLoss, p.TakeProfit, p.LotSize);
+                p.Entry, brokerResult.ExecutedPrice, slippagePips, p.StopLoss, p.TakeProfit, p.LotSize);
         }
         else
         {

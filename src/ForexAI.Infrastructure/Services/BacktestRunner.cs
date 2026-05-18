@@ -357,6 +357,7 @@ internal class BacktestSystemStateStub : ISystemStateService
     public decimal NanoMaxDailyLossUsd => 0m;  // disabled untuk backtest
     public decimal NanoEquityFloorUsd  => 0m;
     public decimal MaxWeeklyDrawdownPct => 0m;  // disabled untuk backtest
+    public int MaxTradesPerDay => 999;  // disabled untuk backtest
 
     public void Halt(string reason) { }
     public void Resume() { }
@@ -370,7 +371,8 @@ internal class BacktestSystemStateStub : ISystemStateService
         int? cooldownMinutes = null,
         decimal? nanoMaxDailyLossUsd = null,
         decimal? nanoEquityFloorUsd = null,
-        decimal? maxWeeklyDrawdownPct = null) { /* no-op for backtest stub */ }
+        decimal? maxWeeklyDrawdownPct = null,
+        int? maxTradesPerDay = null) { /* no-op for backtest stub */ }
 }
 
 /// <summary>

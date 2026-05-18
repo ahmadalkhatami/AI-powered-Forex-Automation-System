@@ -546,22 +546,24 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             }
         }
 
-        // VETO 6 — HTF D1 conflict (macro trend bias melawan signal)
-        // D1 adalah timeframe paling kuat — trade lawan D1 = swimming upstream.
-        // Skip kalau D1 data tidak tersedia (< 50 D1 candles cached).
-        // Lessons learned dari trade SELL @ 1.16227 (D1 bullish, M15+H1 bearish) → reversal saat reach support.
+        // HTF D1 modifier — bukan hard veto lagi (audit feedback: M15 scalp pullback
+        // valid di counter-D1 trend, harusnya require higher confidence, not block).
+        //
+        // Behavior baru:
+        // - D1 align dengan signal direction: pass-through (best case)
+        // - D1 counter signal: tetap pass, tapi tag warning. Confidence threshold higher
+        //   di-enforce di Nano vetos / auto-approve gate. Pattern/breakout still bisa
+        //   promote/boost counter-D1 setup kalau setup quality cukup tinggi.
         if (snap.MA20_D1 > 0m && snap.MA50_D1 > 0m)
         {
             bool d1Bullish = snap.MA20_D1 > snap.MA50_D1;
             if (signal == SignalDirection.SELL && d1Bullish)
             {
-                reasons.Add($"VETO: SELL di-override ke HOLD — D1 trend BULLISH (MA20 {snap.MA20_D1:F5} > MA50 {snap.MA50_D1:F5}), counter-D1 risiko tinggi.");
-                return (SignalDirection.HOLD, reasons);
+                reasons.Add($"HTF MODIFIER: D1 BULLISH (MA20 {snap.MA20_D1:F5} > MA50 {snap.MA50_D1:F5}), SELL counter-D1 — butuh confidence ≥75% untuk auto-approve.");
             }
-            if (signal == SignalDirection.BUY && !d1Bullish)
+            else if (signal == SignalDirection.BUY && !d1Bullish)
             {
-                reasons.Add($"VETO: BUY di-override ke HOLD — D1 trend BEARISH (MA20 {snap.MA20_D1:F5} < MA50 {snap.MA50_D1:F5}), counter-D1 risiko tinggi.");
-                return (SignalDirection.HOLD, reasons);
+                reasons.Add($"HTF MODIFIER: D1 BEARISH (MA20 {snap.MA20_D1:F5} < MA50 {snap.MA50_D1:F5}), BUY counter-D1 — butuh confidence ≥75% untuk auto-approve.");
             }
         }
 

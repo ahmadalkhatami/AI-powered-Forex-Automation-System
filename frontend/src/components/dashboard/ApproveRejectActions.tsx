@@ -35,6 +35,8 @@ export function ApproveRejectActions({
   const [rejectOpen, setRejectOpen] = useState(false)
 
   const isProcessing = state === 'processing'
+  const isDisabled = state === 'disabled-nogo' || isProcessing
+  const isHoldSignal = signal.signal === 'HOLD'
 
   return (
     <div className="flex flex-col gap-2">
@@ -45,17 +47,21 @@ export function ApproveRejectActions({
             'flex-1 font-semibold',
             state === 'enabled-go' && 'bg-emerald-600 hover:bg-emerald-700 text-white',
             state === 'enabled-caution' && 'bg-amber-500 hover:bg-amber-600 text-white',
-            state === 'disabled-nogo' && 'bg-emerald-600 text-white opacity-70',
+            state === 'disabled-nogo' && 'bg-zinc-500 text-zinc-300 opacity-60 cursor-not-allowed',
             state === 'processing' && 'bg-emerald-600 text-white opacity-75 cursor-not-allowed pointer-events-none',
           )}
-          aria-disabled={isProcessing}
-          onClick={!isProcessing ? () => setApproveOpen(true) : undefined}
+          aria-disabled={isDisabled}
+          disabled={isDisabled}
+          onClick={!isDisabled ? () => setApproveOpen(true) : undefined}
+          title={isHoldSignal ? 'Signal HOLD — tidak ada arah trade yang bisa di-execute' : undefined}
         >
           {isProcessing ? (
             <span className="flex items-center gap-2">
               <Loader2 size={16} className="animate-spin" />
               Processing…
             </span>
+          ) : isHoldSignal ? (
+            'APPROVE (HOLD — locked)'
           ) : (
             'APPROVE'
           )}

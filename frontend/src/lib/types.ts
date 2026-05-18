@@ -260,6 +260,7 @@ export interface SettingsResponse {
   nanoMaxDailyLossUsd: number
   nanoEquityFloorUsd: number
   maxWeeklyDrawdownPct: number
+  maxTradesPerDay: number
   isHalted: boolean
   haltReason: string | null
 }
@@ -272,6 +273,7 @@ export interface SettingsUpdateRequest {
   nanoMaxDailyLossUsd?: number
   nanoEquityFloorUsd?: number
   maxWeeklyDrawdownPct?: number
+  maxTradesPerDay?: number
 }
 
 export interface SignalHeroData {

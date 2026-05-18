@@ -23,10 +23,10 @@ Status legend:
 | Confluence score (weighted) | ✅ Live | Trend 40% + Momentum 35% + Structure 25% |
 | Confidence score (agreement-based) | ✅ Live | 1.0 − stddev × 2.5, regime-adjusted |
 
-### Filters / Vetos
+### Filters / Vetos / Modifiers
 | Feature | Status | Notes |
 |---|---|---|
-| D1 HTF veto | ✅ Live | Block trade counter-D1 trend |
+| D1 HTF **modifier** | ✅ Live | **Bukan hard veto lagi** — counter-D1 setup pass, tapi auto-approve require conf ≥75% (vs 70% default). Allows pullback scalping. |
 | Cooldown post-LOSS | ✅ Live | 30 min default, same-direction blocked |
 | RSI extreme veto | ✅ Live | Skip BUY kalau RSI ≥ 70, SELL ≤ 30 |
 | Overextension veto | ✅ Live | Skip kalau price > 2×ATR dari MA20 |
@@ -87,7 +87,7 @@ Status legend:
 | Nano daily $ loss cap | ✅ Live | Default $5, halt sampai UTC midnight |
 | Nano equity floor | ✅ Live | Default $20, permanent halt sampai manual review |
 | Circuit breaker (3 cons LOSS) | ✅ Live | Auto-halt |
-| Max trade/day | 📋 Planned | Currently uncapped per-day (only constrained oleh max positions) |
+| Max trade/day | ✅ Live | Default 7/hari, count by `openedAt` UTC date. Configurable via Settings UI. |
 
 ### Trade Management (sudah open)
 | Feature | Status | Notes |
@@ -158,13 +158,28 @@ Status legend:
 | Demo mode (MIFX_DEMO) | ✅ Live | Real broker, demo account |
 | Real mode (MIFX_REAL) | 🚧 Partial | Infrastructure ready, hard $ caps active untuk Nano |
 | Auto-detect demo/real | ✅ Live | ModeService dari `AccountInfoString` |
-| Order fill confirmation | 🚧 Partial | Fire-and-forget execute, no retry logic |
-| Slippage tracking | 📋 Planned | Compare requested vs actual entry price |
+| Order fill confirmation | ✅ Live | Open: awaited dengan `brokerResult.Success` check. Close: async dengan logged retry-allow (sebelumnya fire-and-forget tanpa log). |
+| **Slippage tracking** | ✅ Live | Log requested entry vs `brokerResult.ExecutedPrice` per trade. Pip delta = adverse fill amount. Foundation untuk edge analysis. |
 | Latency monitoring | 📋 Planned | Alert kalau tick > 500ms delay |
 
 ---
 
-## 7. Considered & Rejected
+## 7. Recent Audit Response
+
+External audit (Nov 2026) identified concerns about decision hierarchy + execution layer. Response implemented:
+
+| Audit Concern | Status | Action |
+|---|---|---|
+| D1 HTF veto terlalu keras untuk M15 scalping | ✅ Fixed | Convert veto → modifier (require conf ≥75% counter-D1) |
+| Execution layer fire-and-forget (close) | ✅ Fixed | `FireCloseWithLogging` wrap dengan async error handling + retry-allow on failure |
+| Slippage tracking absent | ✅ Fixed | Log requested vs `ExecutedPrice` per trade |
+| Max trade/day cap absent | ✅ Fixed | Default 7/hari, settable via Settings UI |
+| "Filter heavy" → over-dampening | 🔄 Measure | Analytics endpoint `bySignalSource` track Breakout vs MA Cross win rate untuk validate. Wait for 30-50 trade sample. |
+| Confluence stacking too heavy | ❌ Disagree | Stddev-based confidence by design — low agreement → low conf. Not a bug. |
+
+---
+
+## 8. Considered & Rejected
 
 Feature yang di-evaluate tapi decide NOT implement:
 
@@ -180,7 +195,7 @@ Feature yang di-evaluate tapi decide NOT implement:
 
 ---
 
-## 8. Roadmap Indicative
+## 9. Roadmap Indicative
 
 Setelah live test 2-4 minggu dengan current features:
 

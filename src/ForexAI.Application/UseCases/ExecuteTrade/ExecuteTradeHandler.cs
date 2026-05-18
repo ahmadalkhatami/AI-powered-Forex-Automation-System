@@ -17,6 +17,7 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
     private readonly IBrokerService _broker;
     private readonly ISystemStateService _systemState;
     private readonly IModeService _mode;
+    private readonly IMarketSpreadGate _spreadGate;
     private readonly ILogger<ExecuteTradeHandler> _logger;
 
     public ExecuteTradeHandler(
@@ -25,6 +26,7 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
         IBrokerService broker,
         ISystemStateService systemState,
         IModeService mode,
+        IMarketSpreadGate spreadGate,
         ILogger<ExecuteTradeHandler> logger)
     {
         _signals = signals;
@@ -32,6 +34,7 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
         _broker = broker;
         _systemState = systemState;
         _mode = mode;
+        _spreadGate = spreadGate;
         _logger = logger;
     }
 
@@ -62,6 +65,31 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
             var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
             await _positions.SaveAsync(skipped);
             return skipped;
+        }
+
+        // ── Spread Gate (live broker only) ───────────────────────────────────
+        // 1. Absolute spread > MaxSpreadPips → reject (broker too wide).
+        // 2. Spread spike (current > 2.5× rolling avg) → reject (news event /
+        //    liquidity drying). Skip kalau warm-up (< 20 samples).
+        if (_broker.IsLive)
+        {
+            decimal currentSpread = _spreadGate.CurrentSpreadPips;
+            if (currentSpread > _systemState.MaxSpreadPips)
+            {
+                var msg = $"Spread {currentSpread:F1}p > max {_systemState.MaxSpreadPips:F1}p — broker too wide, trade skipped.";
+                _logger.LogWarning("Trade skipped: {Reason}", msg);
+                var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
+                await _positions.SaveAsync(skipped);
+                return skipped;
+            }
+            if (_spreadGate.IsSpike(out var spikeCurrent, out var rollingAvg))
+            {
+                var msg = $"Spread spike: {spikeCurrent:F1}p > 2.5× rolling avg {rollingAvg:F1}p — likely news/liquidity event, trade skipped.";
+                _logger.LogWarning("Trade skipped: {Reason}", msg);
+                var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
+                await _positions.SaveAsync(skipped);
+                return skipped;
+            }
         }
 
         // Circuit breaker: stop kalau LOSS berturut-turut mencapai threshold
@@ -185,6 +213,37 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
 
                 _logger.LogInformation("Nano override: risk {Old:P1} → {New:P1} (lot {OldLot} → {NewLot})",
                     tier.RiskPerTradePct, overridePct, p.LotSize, newLotSize);
+
+                p = p with { RiskAmount = newRiskAmount, LotSize = newLotSize, PotentialProfit = newPotentialProfit };
+            }
+        }
+
+        // ── Dynamic Sizing: confidence-weighted + post-loss adaptation ───────
+        // 1. Confidence multiplier: setup A+ (conf 85%+) dapat lot lebih besar,
+        //    setup mediocre (conf 60-65%) dapat lot lebih kecil.
+        //    Formula: 0.7 + (conf - 0.6) × 1.5, clamped [0.7, 1.3]
+        // 2. Loss-adapt multiplier: setiap loss berturut-turut kurangi 25%.
+        //    0 loss → 1.0×, 1 loss → 0.8×, 2 loss → 0.67×, 3+ → halt (sudah ada).
+        //
+        // Compound: final risk = base × confMult × lossMult.
+        // Tidak override Nano slider (kalau user explicit set, hormati pilihan).
+        if (request.RiskPctOverride is null)
+        {
+            decimal confMult = Math.Clamp(0.7m + (signal.ConfidenceScore - 0.6m) * 1.5m, 0.7m, 1.3m);
+            decimal lossMult = 1.0m / (1.0m + consecutiveLosses * 0.25m);
+            decimal totalMult = confMult * lossMult;
+
+            if (Math.Abs(totalMult - 1.0m) > 0.01m)  // skip kalau effectively 1.0
+            {
+                decimal newRiskAmount = Math.Round(p.RiskAmount * totalMult, 2);
+                int slPips = p.StopLossPips;
+                decimal newLotSize = Math.Max(Math.Round(newRiskAmount / (slPips * 10m), 2), 0.01m);
+                decimal newPotentialProfit = Math.Round(newLotSize * p.TakeProfitPips * 10m, 2);
+
+                _logger.LogInformation(
+                    "Dynamic sizing: confMult={Conf:F2} (conf {ConfPct:P0}), lossMult={Loss:F2} ({L} cons. loss), risk ${OldRisk}→${NewRisk}, lot {OldLot}→{NewLot}",
+                    confMult, signal.ConfidenceScore, lossMult, consecutiveLosses,
+                    p.RiskAmount, newRiskAmount, p.LotSize, newLotSize);
 
                 p = p with { RiskAmount = newRiskAmount, LotSize = newLotSize, PotentialProfit = newPotentialProfit };
             }

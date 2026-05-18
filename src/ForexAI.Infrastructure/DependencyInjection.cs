@@ -56,6 +56,8 @@ public static class DependencyInjection
 
         // MIFX singletons — ingestion EA: tick + candle + command queue + position sync
         services.AddSingleton<MifxPriceFeed>();
+        // MifxPriceFeed implements IMarketSpreadGate — same instance untuk spread veto
+        services.AddSingleton<IMarketSpreadGate>(sp => sp.GetRequiredService<MifxPriceFeed>());
         services.AddSingleton<MifxCandleFeed>();
         services.AddSingleton<MifxCommandQueue>();
         services.AddScoped<MifxPositionSyncService>();

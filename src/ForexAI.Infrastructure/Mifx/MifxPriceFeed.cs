@@ -1,3 +1,4 @@
+using ForexAI.Domain.Interfaces;
 using ForexAI.Domain.ValueObjects;
 
 namespace ForexAI.Infrastructure.Mifx;
@@ -6,7 +7,7 @@ namespace ForexAI.Infrastructure.Mifx;
 /// Singleton — menyimpan tick terbaru dan posisi open yang dikirim EA MT5.
 /// Thread-safe via lock.
 /// </summary>
-public class MifxPriceFeed
+public class MifxPriceFeed : IMarketSpreadGate
 {
     private MifxTick? _latest;
     private IReadOnlyList<MifxBrokerPosition> _positions = Array.Empty<MifxBrokerPosition>();
@@ -15,6 +16,11 @@ public class MifxPriceFeed
     // yang bisa stale/berbeda timezone dari backend).
     private DateTimeOffset _receivedAt = DateTimeOffset.MinValue;
     private readonly object _lock = new();
+
+    // Rolling spread history untuk spike detection — last 60 samples.
+    // Pakai Queue (FIFO) supaya cheap append + pop oldest.
+    private const int SpreadHistoryMax = 60;
+    private readonly Queue<decimal> _spreadHistory = new();
 
     public MifxTick? Latest
     {
@@ -51,6 +57,41 @@ public class MifxPriceFeed
             _receivedAt = DateTimeOffset.UtcNow;
             if (positions is not null)
                 _positions = positions;
+            // Track rolling spread for spike detection
+            _spreadHistory.Enqueue(tick.Spread);
+            while (_spreadHistory.Count > SpreadHistoryMax) _spreadHistory.Dequeue();
         }
+    }
+
+    /// <summary>
+    /// Rolling average spread (pips) dari last N samples. Return null kalau
+    /// data history belum cukup (< 20 samples) — caller decide bagaimana
+    /// handle case awal-startup.
+    /// </summary>
+    public decimal? RollingAvgSpreadPips
+    {
+        get
+        {
+            lock (_lock)
+            {
+                if (_spreadHistory.Count < 20) return null;
+                return Math.Round(_spreadHistory.Average(), 2);
+            }
+        }
+    }
+
+    public decimal CurrentSpreadPips => Latest?.Spread ?? 0m;
+
+    /// <summary>
+    /// True kalau current spread spike — terlalu lebar dibanding rolling avg.
+    /// Threshold: current > 2.5× rolling avg AND current > 1.5 pip absolute
+    /// (untuk hindari false positive di rolling avg 0.3 pip jadi 1.0 pip = spike).
+    /// </summary>
+    public bool IsSpike(out decimal currentSpread, out decimal? rollingAvg)
+    {
+        currentSpread = CurrentSpreadPips;
+        rollingAvg = RollingAvgSpreadPips;
+        if (rollingAvg is null) return false;
+        return currentSpread > 2.5m * rollingAvg.Value && currentSpread > 1.5m;
     }
 }

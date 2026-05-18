@@ -78,16 +78,34 @@ export function ChartDrawingOverlay({
     [chart, series],
   )
 
-  // Konversi pixel → data point
+  // Konversi pixel → data point.
+  //
+  // coordinateToTime(px) return null kalau px di KANAN candle terakhir (area
+  // "future" kosong sebelum price scale axis) → user gabisa kasih indikator
+  // di sebelah kanan candle aktif. Fix: extrapolate time dari logical index
+  // (yang selalu return value walau di luar data range) × bar duration.
   const pixelToData = useCallback(
     (px: number, py: number): DrawingPoint | null => {
       if (!chart || !series) return null
-      const time = chart.timeScale().coordinateToTime(px) as Time | null
+      let time = chart.timeScale().coordinateToTime(px) as Time | null
+
+      if (time === null && candles.length >= 2) {
+        const logical = chart.timeScale().coordinateToLogical(px)
+        if (logical !== null) {
+          const lastIdx = candles.length - 1
+          const lastTime = candles[lastIdx].time as number
+          const barDur = (candles[lastIdx].time as number) - (candles[lastIdx - 1].time as number)
+          // logical = 0-indexed dari candle pertama; gap dari last candle ke kanan
+          const gap = (logical as number) - lastIdx
+          time = (lastTime + gap * barDur) as Time
+        }
+      }
+
       const price = series.coordinateToPrice(py)
       if (time === null || price === null || typeof time !== 'number') return null
       return { time: time as number, price }
     },
-    [chart, series],
+    [chart, series, candles],
   )
 
   // Render semua drawing + preview ke canvas

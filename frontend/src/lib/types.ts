@@ -235,6 +235,22 @@ export interface SignalAnalysisData {
 
 export type ActionState = 'enabled-go' | 'enabled-caution' | 'disabled-nogo' | 'processing'
 
+// ── Candlestick Pattern (backend /api/pattern/detect) ────────────────────
+export interface TimeframePattern {
+  name: string                    // "Bullish Pin Bar", "Inside Bar", "None"
+  bias: 'Bullish' | 'Bearish' | 'Neutral'
+  reliability: number             // 0..1
+  description: string
+  candleTimes: number[]           // Unix seconds, candle yang form pattern
+}
+
+export interface PatternResponse {
+  pair: string
+  m15: TimeframePattern
+  h1: TimeframePattern
+  d1: TimeframePattern
+}
+
 export interface SignalHeroData {
   id: string
   pair: string

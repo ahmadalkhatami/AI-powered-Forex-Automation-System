@@ -1,0 +1,64 @@
+using ForexAI.Infrastructure.Mifx;
+using ForexAI.Infrastructure.Services;
+using Microsoft.AspNetCore.Mvc;
+
+namespace ForexAI.API.Controllers;
+
+[ApiController]
+[Route("api/pattern")]
+public class PatternController : ControllerBase
+{
+    private readonly MifxCandleFeed _candleFeed;
+
+    public PatternController(MifxCandleFeed candleFeed)
+    {
+        _candleFeed = candleFeed;
+    }
+
+    /// <summary>
+    /// Deteksi candlestick pattern terbaru untuk pair tertentu di multiple TF.
+    /// Return pattern name, bias, reliability, dan candle time(s) yang form pattern
+    /// (untuk overlay di chart frontend).
+    /// </summary>
+    [HttpGet("detect")]
+    public ActionResult<PatternDetectionResponse> Detect([FromQuery] string pair = "EURUSD")
+    {
+        var result = new PatternDetectionResponse(
+            Pair: pair,
+            M15: DetectForTimeframe(pair, "M15"),
+            H1:  DetectForTimeframe(pair, "H1"),
+            D1:  DetectForTimeframe(pair, "D1"));
+        return Ok(result);
+    }
+
+    private TimeframePattern DetectForTimeframe(string pair, string timeframe)
+    {
+        var candles = _candleFeed.Get(pair, timeframe, 3);
+        if (candles.Count == 0)
+            return new TimeframePattern("None", "Neutral", 0m, "Belum ada candle data", Array.Empty<long>());
+
+        var pat = CandlestickPatternDetector.Detect(candles);
+        if (pat.Name == "None")
+            return new TimeframePattern("None", "Neutral", 0m, "Tidak ada pattern", Array.Empty<long>());
+
+        // Pattern multi-candle: include semua candle time yang relevan
+        // (Star = 3, Engulfing/InsideBar = 2, Pin/Doji/Marubozu = 1)
+        int candleCount = pat.Name.Contains("Star") ? 3 :
+                          (pat.Name.Contains("Engulfing") || pat.Name.Contains("Inside")) ? 2 : 1;
+        var times = candles.TakeLast(candleCount).Select(c => c.Time).ToArray();
+        return new TimeframePattern(pat.Name, pat.Bias, pat.Reliability, pat.Description, times);
+    }
+}
+
+public record PatternDetectionResponse(
+    string Pair,
+    TimeframePattern M15,
+    TimeframePattern H1,
+    TimeframePattern D1);
+
+public record TimeframePattern(
+    string Name,
+    string Bias,
+    decimal Reliability,
+    string Description,
+    long[] CandleTimes);

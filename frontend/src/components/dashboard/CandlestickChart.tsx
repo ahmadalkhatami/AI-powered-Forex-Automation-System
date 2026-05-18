@@ -28,6 +28,8 @@ import { type Drawing, type DrawingStyle, loadDrawings, saveDrawings } from '@/l
 import { ChartToolbar, type ToolMode } from './ChartToolbar'
 import { ChartDrawingOverlay } from './ChartDrawingOverlay'
 import { PositionBoxOverlay, type PositionBox } from './PositionBoxOverlay'
+import { PatternHighlightOverlay } from './PatternHighlightOverlay'
+import type { TimeframePattern } from '@/lib/types'
 
 interface TradeOverlay {
   /** Stable ID untuk dismiss tracking (e.g. active-TRADE123, pending-SIGNAL456) */
@@ -63,6 +65,7 @@ interface Props {
   tradeOverlay?: TradeOverlay | null
   structure?: StructureOverlay | null
   positions?: TradePositionResponse[]
+  pattern?: TimeframePattern | null
   onTimeframeChange?: (tf: ChartTimeframe) => void
   isMifxConnected?: boolean
   isWideMode?: boolean
@@ -98,6 +101,7 @@ export function CandlestickChart({
   tradeOverlay,
   structure,
   positions = [],
+  pattern,
   onTimeframeChange,
   isMifxConnected,
   isWideMode = false,
@@ -731,6 +735,14 @@ export function CandlestickChart({
         style={isCollapsed ? { display: 'none' } : undefined}
       >
         <div ref={mainContainerRef} className="w-full relative" style={{ minHeight: 480 }}>
+          <PatternHighlightOverlay
+            chart={mainChartRef.current}
+            series={candleSeriesRef.current}
+            candles={candles}
+            pattern={pattern ?? null}
+            width={chartSize.width}
+            height={chartSize.height}
+          />
           <PositionBoxOverlay
             chart={mainChartRef.current}
             series={candleSeriesRef.current}

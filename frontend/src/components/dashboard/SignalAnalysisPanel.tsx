@@ -12,6 +12,14 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
 import type { SignalAnalysisData } from '@/lib/types'
+import { PatternIcon } from './PatternIcon'
+
+/** Derive bias dari pattern name string (backend dikembalikan via candlePattern field). */
+function patternBias(name: string): 'Bullish' | 'Bearish' | 'Neutral' {
+  if (name.startsWith('Bullish') || name === 'Morning Star') return 'Bullish'
+  if (name.startsWith('Bearish') || name === 'Evening Star') return 'Bearish'
+  return 'Neutral'
+}
 
 type TremorColor = 'emerald' | 'amber' | 'red'
 
@@ -109,12 +117,29 @@ export function SignalAnalysisPanel({ data }: SignalAnalysisPanelProps) {
             subtitle={`RSI ${data.momentumRSI} · ${data.momentumDirection}`}
             rationale={data.momentumRationale}
           />
-          <ScoreRow
-            label="Structure"
-            score={data.structureScore}
-            subtitle={data.structurePattern}
-            rationale={data.structureRationale}
-          />
+          <div className="py-2">
+            <div className="grid grid-cols-[80px_1fr_40px] gap-3 items-center">
+              <span className="text-xs text-muted-foreground font-medium">Structure</span>
+              <div className="space-y-1">
+                <ProgressBar value={data.structureScore * 100} color={scoreColor(data.structureScore)} />
+                <div className="flex items-center gap-1.5">
+                  <PatternIcon name={data.structurePattern} bias={patternBias(data.structurePattern)} size={14} />
+                  <span className={cn(
+                    'text-xs font-medium',
+                    patternBias(data.structurePattern) === 'Bullish' && 'text-emerald-500 dark:text-emerald-400',
+                    patternBias(data.structurePattern) === 'Bearish' && 'text-red-500 dark:text-red-400',
+                    patternBias(data.structurePattern) === 'Neutral' && 'text-amber-500 dark:text-amber-400',
+                  )}>
+                    {data.structurePattern}
+                  </span>
+                </div>
+              </div>
+              <span className="text-sm font-mono font-bold text-right">
+                {(data.structureScore * 100).toFixed(0)}%
+              </span>
+            </div>
+            <p className="mt-1 ml-[92px] text-xs text-muted-foreground">{data.structureRationale}</p>
+          </div>
 
           <Separator className="my-3" />
 

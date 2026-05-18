@@ -153,6 +153,14 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         // ── 3. Structure ────────────────────────────────────────────────────
         var (structure, pctFromSupport) = AnalyzeStructure(snap);
 
+        // ── 3b. Candlestick pattern detection ──────────────────────────────
+        var patternCandles = _candleFeed.Get(snap.Pair, snap.Timeframe, 3);
+        var pattern = CandlestickPatternDetector.Detect(patternCandles);
+        if (pattern.Name != "None")
+        {
+            structure = structure with { CandlePattern = pattern.Name };
+        }
+
         // ── 4. Signal direction ─────────────────────────────────────────────
         var signal = DetermineSignal(bullishBias, momentum, pctFromSupport);
 

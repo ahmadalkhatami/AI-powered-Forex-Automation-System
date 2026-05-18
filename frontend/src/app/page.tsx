@@ -13,6 +13,7 @@ import { AccountHealthBar } from '@/components/dashboard/AccountHealthBar'
 import { PositionsList } from '@/components/dashboard/PositionsList'
 import { CandlestickChart } from '@/components/dashboard/CandlestickChart'
 import { MifxLiveTicker } from '@/components/dashboard/MifxLiveTicker'
+import { SessionChip } from '@/components/dashboard/SessionChip'
 import { useToast } from '@/hooks/use-toast'
 import { useDashboardStream } from '@/lib/useDashboardStream'
 import {
@@ -27,6 +28,7 @@ import {
   deployEa,
   haltSystem,
   resumeSystem,
+  fetchPatterns,
 } from '@/lib/api'
 import type {
   SignalHeroData,
@@ -43,6 +45,8 @@ import type {
   CandleBar,
   ChartTimeframe,
   MifxStatusResponse,
+  PatternResponse,
+  TimeframePattern,
 } from '@/lib/types'
 
 const INITIAL_EQUITY = 1_000
@@ -179,6 +183,7 @@ export default function DashboardPage() {
   const [candles, setCandles] = useState<CandleBar[]>([])
   const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('M15')
   const [chartWideMode, setChartWideMode] = useState(false)
+  const [patterns, setPatterns] = useState<PatternResponse | null>(null)
   const [mifxStatus, setMifxStatus] = useState<MifxStatusResponse | null>(null)
   const [autoTrigger, setAutoTrigger] = useState(false)
   const [autoApprove, setAutoApprove] = useState(false)
@@ -306,6 +311,20 @@ export default function DashboardPage() {
     const id = setInterval(fetchCandles, 15_000)
     return () => clearInterval(id)
   }, [chartTimeframe])
+
+  // Pattern detection — poll tiap 30 detik (lebih ringan dari trigger signal analyze)
+  useEffect(() => {
+    let alive = true
+    const fetchOnce = async () => {
+      try {
+        const p = await fetchPatterns('EURUSD')
+        if (alive) setPatterns(p)
+      } catch { /* silent — endpoint optional */ }
+    }
+    fetchOnce()
+    const id = setInterval(fetchOnce, 30_000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
 
   // Mirror SignalR push → state utama (real-time, sub-detik latency)
   useEffect(() => {
@@ -737,6 +756,14 @@ export default function DashboardPage() {
     .map(mapToPositionCard)
   const actionState = deriveActionState(pageState, riskValidation, rawSignal)
 
+  // Pattern untuk TF aktif (M15/H1/D1)
+  const activePattern: TimeframePattern | null =
+    patterns === null ? null :
+    chartTimeframe === 'M15' ? patterns.m15 :
+    chartTimeframe === 'H1'  ? patterns.h1  :
+    chartTimeframe === 'D1'  ? patterns.d1  :
+    null
+
   return (
     <div className={cn(
       'grid grid-cols-1 gap-4',
@@ -877,6 +904,7 @@ export default function DashboardPage() {
               <RefreshCw className={cn('h-3.5 w-3.5', pageState === 'loading' && 'animate-spin')} />
               Trigger Analysis
             </Button>
+            <SessionChip />
           </div>
         </div>
 
@@ -889,6 +917,7 @@ export default function DashboardPage() {
           tradeOverlay={tradeOverlay}
           structure={structureOverlay}
           positions={positions}
+          pattern={activePattern}
           onTimeframeChange={setChartTimeframe}
           isMifxConnected={mifxStatus?.connected ?? false}
           isWideMode={chartWideMode}

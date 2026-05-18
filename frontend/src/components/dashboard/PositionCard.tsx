@@ -74,6 +74,17 @@ export function PositionCard({ position, bid, ask, lastTickAt, onCloseMarket }: 
   // Mid untuk display jarak ke SL/TP (cosmetic — bid/ask sama-sama OK di sini)
   const currentPrice = bid !== undefined && ask !== undefined ? (bid + ask) / 2 : undefined
 
+  // Risk-to-Reward indicator — fixed position, inline (not sticky/floating).
+  const slPips = position.stopLoss && position.stopLoss > 0
+    ? Math.round(Math.abs(position.entry - position.stopLoss) * 10000)
+    : 0
+  const tpPips = position.takeProfit && position.takeProfit > 0
+    ? Math.round(Math.abs(position.entry - position.takeProfit) * 10000)
+    : 0
+  const plannedRR = slPips > 0 ? tpPips / slPips : 0
+  // Realized R-multiple kalau ACTIVE: current pips / sl pips
+  const realizedR = slPips > 0 && position.status === 'ACTIVE' ? displayPips / slPips : null
+
   const handleClose = async () => {
     if (!onCloseMarket) return
     setClosing(true)
@@ -158,6 +169,70 @@ export function PositionCard({ position, bid, ask, lastTickAt, onCloseMarket }: 
             </div>
           )}
         </div>
+
+        {/* Risk-to-Reward indicator — fixed inline position, bukan sticky/floating */}
+        {plannedRR > 0 && (
+          <div className="pt-1.5 border-t border-border/50 space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">R:R</span>
+              <span className="font-mono font-semibold">
+                1:{plannedRR.toFixed(2)}
+                {realizedR !== null && (
+                  <span className={cn(
+                    'ml-2 text-[10px]',
+                    realizedR >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400',
+                  )}>
+                    ({realizedR >= 0 ? '+' : ''}{realizedR.toFixed(2)}R)
+                  </span>
+                )}
+              </span>
+            </div>
+            {/* Proportional bar: red segment = SL distance, green segment = TP distance.
+                Entry tick di tengah, current price marker (kalau ACTIVE) di posisi realized R. */}
+            <div className="relative h-1.5 rounded-full bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
+              {(() => {
+                const slWidth = 100 / (1 + plannedRR)          // proportion to SL
+                const tpWidth = 100 - slWidth                   // proportion to TP
+                return (
+                  <>
+                    <div
+                      className="absolute left-0 top-0 h-full bg-red-500/30"
+                      style={{ width: `${slWidth}%` }}
+                    />
+                    <div
+                      className="absolute top-0 h-full bg-emerald-500/30"
+                      style={{ left: `${slWidth}%`, width: `${tpWidth}%` }}
+                    />
+                    {/* Entry tick */}
+                    <div
+                      className="absolute top-0 h-full w-0.5 bg-foreground/60"
+                      style={{ left: `calc(${slWidth}% - 1px)` }}
+                    />
+                    {/* Current price marker (ACTIVE only) — clamp ke range */}
+                    {realizedR !== null && (
+                      <div
+                        className={cn(
+                          'absolute top-[-2px] h-[10px] w-0.5 rounded-full',
+                          realizedR >= 0 ? 'bg-emerald-500' : 'bg-red-500',
+                        )}
+                        style={{
+                          left: `calc(${Math.max(0, Math.min(100,
+                            slWidth + (realizedR / plannedRR) * tpWidth
+                          ))}% - 1px)`,
+                        }}
+                        title={`Realized: ${realizedR.toFixed(2)}R`}
+                      />
+                    )}
+                  </>
+                )
+              })()}
+            </div>
+            <div className="flex justify-between text-[9px] text-muted-foreground font-mono">
+              <span className="text-red-500/80">−{slPips}p risk</span>
+              <span className="text-emerald-500/80">+{tpPips}p reward</span>
+            </div>
+          </div>
+        )}
 
         {/* Floating P&L (interpolated from live MIFX price kalau ACTIVE) */}
         <div className="flex items-center justify-between">

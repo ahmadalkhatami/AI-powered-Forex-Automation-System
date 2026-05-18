@@ -13,6 +13,7 @@ import type {
   SystemState,
   BacktestRunRequest,
   BacktestResult,
+  PatternResponse,
 } from '@/lib/types'
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -155,4 +156,9 @@ export async function runBacktest(req: BacktestRunRequest): Promise<BacktestResu
     method: 'POST',
     body: JSON.stringify(req),
   })
+}
+
+// ── Candlestick pattern detection (per-TF) ──────────────────────────────
+export async function fetchPatterns(pair: string = 'EURUSD'): Promise<PatternResponse> {
+  return fetchApi(`/api/pattern/detect?pair=${encodeURIComponent(pair)}`)
 }

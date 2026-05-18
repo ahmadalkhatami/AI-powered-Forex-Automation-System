@@ -156,10 +156,14 @@ function mapToPositionCard(pos: TradePositionResponse): PositionCardData {
 function deriveActionState(
   pageState: PageState,
   risk: RiskValidationResponse | null,
+  signal: TradeSignalResponse | null,
 ): ActionState {
   if (pageState === 'processing') return 'processing'
   if (!risk) return 'disabled-nogo'
   if (risk.decision === 'NO-GO') return 'disabled-nogo'
+  // HOLD direction: tidak bisa di-execute ke broker, walaupun risk gate GO.
+  // Backend ExecuteTradeHandler reject HOLD dengan "tidak ada arah trade".
+  if (signal && signal.signal === 'HOLD') return 'disabled-nogo'
   if (risk.decision === 'GO_WITH_CAUTION') return 'enabled-caution'
   return 'enabled-go'
 }
@@ -731,7 +735,7 @@ export default function DashboardPage() {
       return (b.closedAt ?? '').localeCompare(a.closedAt ?? '')
     })
     .map(mapToPositionCard)
-  const actionState = deriveActionState(pageState, riskValidation)
+  const actionState = deriveActionState(pageState, riskValidation, rawSignal)
 
   return (
     <div className={cn(

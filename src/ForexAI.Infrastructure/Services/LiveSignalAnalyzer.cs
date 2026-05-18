@@ -29,35 +29,106 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
 
     /// <summary>Breakout detection hasil — dipakai untuk override HOLD + boost confidence.</summary>
     private enum BreakoutDirection { None, Bullish, Bearish }
-    private record BreakoutInfo(BreakoutDirection Direction, decimal LevelPrice, decimal PipsBeyond);
+    private record BreakoutInfo(
+        BreakoutDirection Direction,
+        decimal LevelPrice,
+        decimal PipsBeyond,
+        int ConfirmationsPassed,  // 0-3 dari: strong body, volume, RSI align
+        bool Compression,         // pre-breakout volatility squeeze
+        bool LikelyFakeout,       // wick rejection di candle breakout — entry risky
+        string Rationale);
 
     /// <summary>
-    /// Deteksi breakout: close candle terakhir di luar high/low N bar sebelumnya.
-    /// Bullish: close > max(high[1..N]). Bearish: close < min(low[1..N]).
-    /// Default N=20 (4 jam M15, 20 jam H1, 20 hari D1).
+    /// Deteksi breakout multi-confirmation: close candle terakhir di luar high/low N bar
+    /// sebelumnya + check fakeout filter + compression + 3-factor confirmation.
+    /// Default lookback=20 (4 jam M15, 20 jam H1, 20 hari D1).
     /// </summary>
-    private BreakoutInfo DetectBreakout(string pair, string timeframe, int lookback = 20)
+    private BreakoutInfo DetectBreakout(string pair, string timeframe, decimal rsi14, int lookback = 20)
     {
+        var none = new BreakoutInfo(BreakoutDirection.None, 0m, 0m, 0, false, false, "");
         var bars = _candleFeed.Get(pair, timeframe, lookback + 1);
-        if (bars.Count < lookback + 1) return new BreakoutInfo(BreakoutDirection.None, 0m, 0m);
+        if (bars.Count < lookback + 1) return none;
 
         var current = bars[^1];
         var prevBars = bars.Take(bars.Count - 1).TakeLast(lookback).ToList();
         decimal highest = prevBars.Max(b => b.High);
         decimal lowest  = prevBars.Min(b => b.Low);
 
+        BreakoutDirection dir = BreakoutDirection.None;
+        decimal level = 0m, pipsBeyond = 0m;
         const decimal pipSize = 0.0001m;
+
         if (current.Close > highest)
         {
-            decimal pipsBeyond = Math.Round((current.Close - highest) / pipSize, 1);
-            return new BreakoutInfo(BreakoutDirection.Bullish, highest, pipsBeyond);
+            dir = BreakoutDirection.Bullish;
+            level = highest;
+            pipsBeyond = Math.Round((current.Close - highest) / pipSize, 1);
         }
-        if (current.Close < lowest)
+        else if (current.Close < lowest)
         {
-            decimal pipsBeyond = Math.Round((lowest - current.Close) / pipSize, 1);
-            return new BreakoutInfo(BreakoutDirection.Bearish, lowest, pipsBeyond);
+            dir = BreakoutDirection.Bearish;
+            level = lowest;
+            pipsBeyond = Math.Round((lowest - current.Close) / pipSize, 1);
         }
-        return new BreakoutInfo(BreakoutDirection.None, 0m, 0m);
+
+        if (dir == BreakoutDirection.None) return none;
+
+        // ── Fakeout filter — close near edge of candle range = wick rejection ─
+        // Bullish breakout: close harusnya di upper 60% range (kalau lower = bearish reversal wick)
+        decimal candleRange = current.High - current.Low;
+        bool likelyFakeout = false;
+        if (candleRange > 0m)
+        {
+            decimal closePosInRange = (current.Close - current.Low) / candleRange;  // 0..1
+            likelyFakeout = (dir == BreakoutDirection.Bullish && closePosInRange < 0.4m) ||
+                            (dir == BreakoutDirection.Bearish && closePosInRange > 0.6m);
+        }
+
+        // ── Multi-confirmation count (0-3) ────────────────────────────────────
+        int confirmations = 0;
+        var reasons = new List<string>();
+
+        // Confirm 1: Strong body — body / range > 0.5 (bukan doji)
+        decimal bodySize = Math.Abs(current.Close - current.Open);
+        decimal bodyRatio = candleRange > 0m ? bodySize / candleRange : 0m;
+        if (bodyRatio > 0.5m) { confirmations++; reasons.Add($"body {bodyRatio:P0}"); }
+
+        // Confirm 2: Volume surge — volume > 1.2× avg of last 20 bar (kalau data available)
+        if (current.Volume.HasValue)
+        {
+            var prevVolsWithValue = prevBars.Where(b => b.Volume.HasValue).Select(b => b.Volume!.Value).ToList();
+            if (prevVolsWithValue.Count >= 10)
+            {
+                double avgVol = prevVolsWithValue.Average();
+                if ((double)current.Volume.Value > avgVol * 1.2)
+                {
+                    confirmations++;
+                    reasons.Add($"vol {current.Volume.Value / Math.Max(1d, avgVol):F1}×");
+                }
+            }
+        }
+
+        // Confirm 3: RSI align — bullish breakout butuh RSI > 55, bearish butuh RSI < 45
+        if ((dir == BreakoutDirection.Bullish && rsi14 > 55m) ||
+            (dir == BreakoutDirection.Bearish && rsi14 < 45m))
+        {
+            confirmations++;
+            reasons.Add($"RSI {rsi14:F1}");
+        }
+
+        // ── Compression detection — pre-breakout volatility squeeze ───────────
+        // Rata-rata range 5 bar terakhir < 0.7 × rata-rata range 20 bar sebelumnya.
+        decimal avgRange20 = prevBars.Average(b => b.High - b.Low);
+        var last5Bars = prevBars.TakeLast(5).ToList();
+        decimal avgRange5 = last5Bars.Count >= 5 ? last5Bars.Average(b => b.High - b.Low) : avgRange20;
+        bool compression = avgRange20 > 0m && avgRange5 < 0.7m * avgRange20;
+        if (compression) reasons.Add("compression");
+
+        string rationale = $"{pipsBeyond}p beyond {(dir == BreakoutDirection.Bullish ? "20-bar high" : "20-bar low")} ({level:F5})" +
+                           (reasons.Count > 0 ? $" — {string.Join(", ", reasons)}" : "") +
+                           (likelyFakeout ? " — FAKEOUT SUSPECT (wick rejection)" : "");
+
+        return new BreakoutInfo(dir, level, pipsBeyond, confirmations, compression, likelyFakeout, rationale);
     }
 
     public async Task<TradeSignal> AnalyzeAsync(MarketSnapshot snap)
@@ -100,31 +171,39 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             signal = SignalDirection.HOLD;
         }
 
-        // ── 4f. Breakout detection — promote HOLD ke BUY/SELL kalau breakout
-        //       price aligned dengan D1 trend (yang sebelumnya mem-veto MA cross signal).
-        //       Visual trader sering lihat breakout dulu sebelum MA crossover confirm.
-        var breakout = DetectBreakout(snap.Pair, snap.Timeframe);
+        // ── 4f. Breakout detection — multi-confirmation + fakeout filter + compression
+        //       Promote HOLD ke BUY/SELL kalau breakout valid + aligned dengan D1.
+        var breakout = DetectBreakout(snap.Pair, snap.Timeframe, snap.RSI14);
         if (breakout.Direction != BreakoutDirection.None)
         {
             bool d1Available = snap.MA20_D1 > 0m && snap.MA50_D1 > 0m;
             bool d1Bullish   = d1Available && snap.MA20_D1 > snap.MA50_D1;
             bool d1Bearish   = d1Available && snap.MA20_D1 < snap.MA50_D1;
 
-            // Hanya promote dari HOLD (jangan flip BUY ke SELL atau sebaliknya — itu reversal pattern lebih rumit)
-            if (signal == SignalDirection.HOLD)
+            // Quality threshold untuk promote: minimal 2 confirmation atau compression+1 confirmation,
+            // dan TIDAK fakeout. Conservative — better miss than enter fakeout.
+            bool qualityBreakout = !breakout.LikelyFakeout &&
+                                   (breakout.ConfirmationsPassed >= 2 ||
+                                    (breakout.Compression && breakout.ConfirmationsPassed >= 1));
+
+            if (breakout.LikelyFakeout)
             {
-                // Bullish breakout + D1 bullish (atau D1 tidak ada) + bukan dalam cooldown BUY
+                vetoReasons.Add($"BREAKOUT IGNORED: {breakout.Rationale}");
+            }
+            else if (signal == SignalDirection.HOLD && qualityBreakout)
+            {
+                // Promote hanya kalau breakout berkualitas + aligned dengan D1 (atau D1 tidak ada)
                 if (breakout.Direction == BreakoutDirection.Bullish && !d1Bearish &&
                     !_systemState.IsInCooldown(SignalDirection.BUY, out _))
                 {
-                    vetoReasons.Add($"BREAKOUT: HOLD di-promote ke BUY — close {breakout.PipsBeyond}p di atas 20-bar high ({breakout.LevelPrice:F5})" +
+                    vetoReasons.Add($"BREAKOUT BUY: HOLD di-promote — {breakout.Rationale}" +
                                     (d1Bullish ? ", D1 bullish align." : ""));
                     signal = SignalDirection.BUY;
                 }
                 else if (breakout.Direction == BreakoutDirection.Bearish && !d1Bullish &&
                          !_systemState.IsInCooldown(SignalDirection.SELL, out _))
                 {
-                    vetoReasons.Add($"BREAKOUT: HOLD di-promote ke SELL — close {breakout.PipsBeyond}p di bawah 20-bar low ({breakout.LevelPrice:F5})" +
+                    vetoReasons.Add($"BREAKOUT SELL: HOLD di-promote — {breakout.Rationale}" +
                                     (d1Bearish ? ", D1 bearish align." : ""));
                     signal = SignalDirection.SELL;
                 }
@@ -134,15 +213,22 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         // ── 5. Scores ───────────────────────────────────────────────────────
         var (confluenceScore, confidenceScore) = CalculateScores(trend, momentum, structure, signal, snap.Regime);
 
-        // ── 5b. Breakout confidence boost — aligned dengan signal final
-        if (breakout.Direction != BreakoutDirection.None &&
+        // ── 5b. Breakout confidence boost — scale by quality (confirmations + compression)
+        //       Aligned breakout + 3 confirmations + compression = best setup = +0.15
+        //       Aligned breakout + 1 confirmation, no compression       = mediocre  = +0.05
+        if (breakout.Direction != BreakoutDirection.None && !breakout.LikelyFakeout &&
             ((breakout.Direction == BreakoutDirection.Bullish && signal == SignalDirection.BUY) ||
              (breakout.Direction == BreakoutDirection.Bearish && signal == SignalDirection.SELL)))
         {
-            // Boost 0.05 weak (1-3 pip), 0.10 strong (>3 pip beyond level)
-            decimal boost = breakout.PipsBeyond >= 3m ? 0.10m : 0.05m;
+            // Base boost dari pips beyond level: 0.03 (1-3p) / 0.06 (>3p)
+            decimal boost = breakout.PipsBeyond >= 3m ? 0.06m : 0.03m;
+            // Bonus per confirmation (0-3 × 0.025 = 0..0.075)
+            boost += breakout.ConfirmationsPassed * 0.025m;
+            // Compression bonus +0.04 (pre-breakout squeeze = high probability setup)
+            if (breakout.Compression) boost += 0.04m;
+
             confidenceScore = Math.Min(confidenceScore + boost, 0.95m);
-            confluenceScore = Math.Min(confluenceScore + (breakout.PipsBeyond >= 3m ? 8 : 4), 100);
+            confluenceScore = Math.Min(confluenceScore + (int)Math.Round(boost * 100m), 100);
         }
 
         // ── 4e. Nano-mode extra vetos — STRICT quality threshold untuk modal kecil ─

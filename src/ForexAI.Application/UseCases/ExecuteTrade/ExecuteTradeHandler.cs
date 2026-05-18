@@ -267,7 +267,8 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
                 p.PotentialProfit,
                 p.RiskRewardRatio,
                 mode: "MIFX_DEMO",
-                externalTradeId: brokerResult.ExternalId);
+                externalTradeId: brokerResult.ExternalId,
+                timeframe: signal.Timeframe);
 
             _logger.LogInformation(
                 "Trade OPEN [MIFX_DEMO] {TradeId} (ext:{ExternalId}) — {Direction} {Pair} @ {Entry}, SL {SL}, TP {TP}, lot {Lot}",
@@ -287,7 +288,8 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
                 p.LotSize,
                 p.RiskAmount,
                 p.PotentialProfit,
-                p.RiskRewardRatio);
+                p.RiskRewardRatio,
+                timeframe: signal.Timeframe);
 
             _logger.LogInformation(
                 "Trade OPEN [SIMULATION] {TradeId} — {Direction} {Pair} @ {Entry}, SL {SL}, TP {TP}, lot {Lot}",

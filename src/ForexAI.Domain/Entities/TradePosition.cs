@@ -23,6 +23,8 @@ public class TradePosition
     public string Mode { get; private set; }
     public string? SkipReason { get; private set; }
     public string? ExternalTradeId { get; private set; }
+    /// <summary>Signal timeframe asal trade (M15/H1/D1) — untuk per-TF time stop.</summary>
+    public string? Timeframe { get; private set; }
 
     // Required for ORM/serialization
     private TradePosition() { TradeId = null!; RunId = null!; Pair = null!; Mode = null!; }
@@ -38,7 +40,8 @@ public class TradePosition
         decimal lotSize,
         decimal riskAmount,
         decimal potentialProfit,
-        decimal riskReward)
+        decimal riskReward,
+        string? timeframe = null)
     {
         return new TradePosition
         {
@@ -57,7 +60,8 @@ public class TradePosition
             FloatingPnl = 0m,
             FloatingPnlPips = 0,
             OpenedAt = DateTimeOffset.UtcNow,
-            Mode = "SIMULATION"
+            Mode = "SIMULATION",
+            Timeframe = timeframe
         };
     }
 
@@ -74,7 +78,8 @@ public class TradePosition
         decimal potentialProfit,
         decimal riskReward,
         string mode,
-        string? externalTradeId)
+        string? externalTradeId,
+        string? timeframe = null)
     {
         return new TradePosition
         {
@@ -94,7 +99,8 @@ public class TradePosition
             FloatingPnlPips = 0,
             OpenedAt = DateTimeOffset.UtcNow,
             Mode = mode,
-            ExternalTradeId = externalTradeId
+            ExternalTradeId = externalTradeId,
+            Timeframe = timeframe
         };
     }
 
@@ -137,7 +143,8 @@ public class TradePosition
         DateTimeOffset? closedAt,
         TradeStatus status,
         string mode,
-        string? externalTradeId = null)
+        string? externalTradeId = null,
+        string? timeframe = null)
     {
         return new TradePosition
         {
@@ -158,7 +165,8 @@ public class TradePosition
             OpenedAt = openedAt,
             ClosedAt = closedAt,
             Mode = mode,
-            ExternalTradeId = externalTradeId
+            ExternalTradeId = externalTradeId,
+            Timeframe = timeframe
         };
     }
 

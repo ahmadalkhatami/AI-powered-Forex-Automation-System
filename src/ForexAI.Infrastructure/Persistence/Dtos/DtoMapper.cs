@@ -26,7 +26,8 @@ internal static class DtoMapper
         ClosedAt = p.ClosedAt,
         Mode = p.Mode,
         SkipReason = p.SkipReason,
-        ExternalTradeId = p.ExternalTradeId
+        ExternalTradeId = p.ExternalTradeId,
+        Timeframe = p.Timeframe
     };
 
     public static TradePosition ToDomain(TradePositionDto dto)
@@ -47,7 +48,8 @@ internal static class DtoMapper
                 dto.LotSize, dto.RiskAmount, dto.PotentialProfit, dto.RiskReward,
                 dto.FloatingPnl, dto.FloatingPnlPips,
                 dto.OpenedAt, dto.ClosedAt, status, dto.Mode,
-                externalTradeId: dto.ExternalTradeId),
+                externalTradeId: dto.ExternalTradeId,
+                timeframe: dto.Timeframe),
 
             TradeStatus.CLOSED_WIN or TradeStatus.CLOSED_LOSS => TradePosition.CreateFromHistory(
                 dto.TradeId, dto.RunId, dto.Pair, direction,
@@ -55,7 +57,8 @@ internal static class DtoMapper
                 dto.LotSize, dto.RiskAmount, dto.PotentialProfit, dto.RiskReward,
                 dto.FloatingPnl, dto.FloatingPnlPips,
                 dto.OpenedAt, dto.ClosedAt, status, dto.Mode,
-                externalTradeId: dto.ExternalTradeId),
+                externalTradeId: dto.ExternalTradeId,
+                timeframe: dto.Timeframe),
 
             _ => TradePosition.CreateSkipped(dto.TradeId, dto.RunId, dto.Pair, "unknown status")
         };

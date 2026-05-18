@@ -34,21 +34,47 @@ public class MifxPositionSyncService
     private readonly HashSet<string> _closingInProgress = new();
 
     // Tier-aware threshold: nano mode (modal kecil) lebih agresif lock profit.
-    // Standard: BE @ +1R, trail @ +1.5R retrace 1R, time stop 360min (6h)
-    // Nano:     BE @ +0.5R, trail @ +1R retrace 0.5R, time stop 120min (2h) — protect tiny modal
-    private (decimal beTrigger, decimal trailTrigger, decimal trailGiveBack, int timeStopMin) GetThresholds()
+    // Standard: BE @ +1R, trail @ +1.5R retrace 1R
+    // Nano:     BE @ +0.5R, trail @ +1R retrace 0.5R — protect tiny modal
+    // Time stop dipisah ke GetTimeStopMinutes() — per-TF, bukan global.
+    private (decimal beTrigger, decimal trailTrigger, decimal trailGiveBack) GetTrailingThresholds()
     {
-        // Best-effort: kalau gak bisa hitung tier, fallback ke default standard.
         try
         {
             var account = _broker.GetAccountAsync().GetAwaiter().GetResult();
             decimal equity = account.Balance > 0 ? account.Balance : account.Equity;
             var tier = RiskTier.FromEquity(equity, _mode.CurrentMode);
-            if (tier.Name == "nano")
-                return (0.5m, 1.0m, 0.5m, 120);
+            if (tier.Name == "nano") return (0.5m, 1.0m, 0.5m);
         }
         catch { /* fallback */ }
-        return (1.0m, 1.5m, 1.0m, _systemState.MaxHoldingMinutes);
+        return (1.0m, 1.5m, 1.0m);
+    }
+
+    /// <summary>
+    /// Per-timeframe time stop — adapt sesuai signal TF asal trade.
+    /// Sehat untuk swing trader yang hold D1 setup beberapa hari.
+    /// Nano tier override: tetap agresif 2 jam apapun TF-nya (protect modal kecil).
+    /// </summary>
+    private int GetTimeStopMinutes(string? timeframe)
+    {
+        // Nano tier: cap 2h regardless of TF (protect modal $30-60)
+        try
+        {
+            var account = _broker.GetAccountAsync().GetAwaiter().GetResult();
+            decimal equity = account.Balance > 0 ? account.Balance : account.Equity;
+            var tier = RiskTier.FromEquity(equity, _mode.CurrentMode);
+            if (tier.Name == "nano") return 120;
+        }
+        catch { /* fallback ke per-TF */ }
+
+        // Per-TF: ~24 bar untuk scalp/intraday TF, 7 bar untuk swing D1
+        return timeframe switch
+        {
+            "M15" => 24 * 15,        //   360 min =  6 jam (24 bar M15)
+            "H1"  => 24 * 60,        //  1440 min = 24 jam (24 bar H1)
+            "D1"  => 7 * 24 * 60,    // 10080 min =  7 hari (7 bar D1)
+            _     => _systemState.MaxHoldingMinutes   // legacy fallback
+        };
     }
 
     public MifxPositionSyncService(
@@ -77,8 +103,9 @@ public class MifxPositionSyncService
         var localOpen = await _repo.GetOpenPositionsAsync();
         if (localOpen.Count == 0) return;
 
-        // Tier-aware thresholds untuk BE/trail/time-stop (nano mode lebih protektif)
-        var (beTrigger, trailTrigger, trailGiveBack, timeStopMin) = GetThresholds();
+        // Tier-aware trailing thresholds (BE/trail) — apply ke semua posisi.
+        // Time stop dihitung per posisi (per-TF) di loop di bawah.
+        var (beTrigger, trailTrigger, trailGiveBack) = GetTrailingThresholds();
 
         var toUpdate = new List<Domain.Entities.TradePosition>();
 
@@ -133,15 +160,16 @@ public class MifxPositionSyncService
                     }
                 }
 
-                // Time stop — auto-close kalau posisi held > timeStopMin (tier-aware)
+                // Time stop — per-TF: M15=6h, H1=24h, D1=7days. Nano tier override ke 2h.
+                int timeStopMin = GetTimeStopMinutes(local.Timeframe);
                 if (timeStopMin > 0 && local.OpenedAt.HasValue)
                 {
                     var ageMinutes = (DateTimeOffset.UtcNow - local.OpenedAt.Value).TotalMinutes;
                     if (ageMinutes >= timeStopMin && !_closingInProgress.Contains(local.TradeId))
                     {
                         _logger.LogWarning(
-                            "Time stop fire: {Id} held {Age:F0} min ≥ {Max} min — close otomatis",
-                            local.TradeId, ageMinutes, timeStopMin);
+                            "Time stop fire: {Id} (TF={Tf}) held {Age:F0} min ≥ {Max} min — close otomatis",
+                            local.TradeId, local.Timeframe ?? "?", ageMinutes, timeStopMin);
                         _closingInProgress.Add(local.TradeId);
                         // Fire-and-forget close — actual close akan di-detect di sync berikutnya
                         _ = _broker.ClosePositionAsync(local);

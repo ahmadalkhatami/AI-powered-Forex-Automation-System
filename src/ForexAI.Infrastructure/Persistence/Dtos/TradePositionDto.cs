@@ -21,4 +21,5 @@ internal record TradePositionDto
     public string Mode { get; init; } = "";
     public string? SkipReason { get; init; }
     public string? ExternalTradeId { get; init; }
+    public string? Timeframe { get; init; }
 }

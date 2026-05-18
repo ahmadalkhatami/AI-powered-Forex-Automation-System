@@ -3,6 +3,7 @@ using ForexAI.Domain.Entities;
 using ForexAI.Domain.Enums;
 using ForexAI.Domain.Interfaces;
 using ForexAI.Domain.ValueObjects;
+using ForexAI.Infrastructure.Mifx;
 
 namespace ForexAI.Infrastructure.Services;
 
@@ -16,12 +17,47 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
     private readonly IBrokerService _broker;
     private readonly ISystemStateService _systemState;
     private readonly IModeService _mode;
+    private readonly MifxCandleFeed _candleFeed;
 
-    public LiveSignalAnalyzer(IBrokerService broker, ISystemStateService systemState, IModeService mode)
+    public LiveSignalAnalyzer(IBrokerService broker, ISystemStateService systemState, IModeService mode, MifxCandleFeed candleFeed)
     {
         _broker      = broker;
         _systemState = systemState;
         _mode        = mode;
+        _candleFeed  = candleFeed;
+    }
+
+    /// <summary>Breakout detection hasil — dipakai untuk override HOLD + boost confidence.</summary>
+    private enum BreakoutDirection { None, Bullish, Bearish }
+    private record BreakoutInfo(BreakoutDirection Direction, decimal LevelPrice, decimal PipsBeyond);
+
+    /// <summary>
+    /// Deteksi breakout: close candle terakhir di luar high/low N bar sebelumnya.
+    /// Bullish: close > max(high[1..N]). Bearish: close < min(low[1..N]).
+    /// Default N=20 (4 jam M15, 20 jam H1, 20 hari D1).
+    /// </summary>
+    private BreakoutInfo DetectBreakout(string pair, string timeframe, int lookback = 20)
+    {
+        var bars = _candleFeed.Get(pair, timeframe, lookback + 1);
+        if (bars.Count < lookback + 1) return new BreakoutInfo(BreakoutDirection.None, 0m, 0m);
+
+        var current = bars[^1];
+        var prevBars = bars.Take(bars.Count - 1).TakeLast(lookback).ToList();
+        decimal highest = prevBars.Max(b => b.High);
+        decimal lowest  = prevBars.Min(b => b.Low);
+
+        const decimal pipSize = 0.0001m;
+        if (current.Close > highest)
+        {
+            decimal pipsBeyond = Math.Round((current.Close - highest) / pipSize, 1);
+            return new BreakoutInfo(BreakoutDirection.Bullish, highest, pipsBeyond);
+        }
+        if (current.Close < lowest)
+        {
+            decimal pipsBeyond = Math.Round((lowest - current.Close) / pipSize, 1);
+            return new BreakoutInfo(BreakoutDirection.Bearish, lowest, pipsBeyond);
+        }
+        return new BreakoutInfo(BreakoutDirection.None, 0m, 0m);
     }
 
     public async Task<TradeSignal> AnalyzeAsync(MarketSnapshot snap)
@@ -64,8 +100,50 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             signal = SignalDirection.HOLD;
         }
 
+        // ── 4f. Breakout detection — promote HOLD ke BUY/SELL kalau breakout
+        //       price aligned dengan D1 trend (yang sebelumnya mem-veto MA cross signal).
+        //       Visual trader sering lihat breakout dulu sebelum MA crossover confirm.
+        var breakout = DetectBreakout(snap.Pair, snap.Timeframe);
+        if (breakout.Direction != BreakoutDirection.None)
+        {
+            bool d1Available = snap.MA20_D1 > 0m && snap.MA50_D1 > 0m;
+            bool d1Bullish   = d1Available && snap.MA20_D1 > snap.MA50_D1;
+            bool d1Bearish   = d1Available && snap.MA20_D1 < snap.MA50_D1;
+
+            // Hanya promote dari HOLD (jangan flip BUY ke SELL atau sebaliknya — itu reversal pattern lebih rumit)
+            if (signal == SignalDirection.HOLD)
+            {
+                // Bullish breakout + D1 bullish (atau D1 tidak ada) + bukan dalam cooldown BUY
+                if (breakout.Direction == BreakoutDirection.Bullish && !d1Bearish &&
+                    !_systemState.IsInCooldown(SignalDirection.BUY, out _))
+                {
+                    vetoReasons.Add($"BREAKOUT: HOLD di-promote ke BUY — close {breakout.PipsBeyond}p di atas 20-bar high ({breakout.LevelPrice:F5})" +
+                                    (d1Bullish ? ", D1 bullish align." : ""));
+                    signal = SignalDirection.BUY;
+                }
+                else if (breakout.Direction == BreakoutDirection.Bearish && !d1Bullish &&
+                         !_systemState.IsInCooldown(SignalDirection.SELL, out _))
+                {
+                    vetoReasons.Add($"BREAKOUT: HOLD di-promote ke SELL — close {breakout.PipsBeyond}p di bawah 20-bar low ({breakout.LevelPrice:F5})" +
+                                    (d1Bearish ? ", D1 bearish align." : ""));
+                    signal = SignalDirection.SELL;
+                }
+            }
+        }
+
         // ── 5. Scores ───────────────────────────────────────────────────────
         var (confluenceScore, confidenceScore) = CalculateScores(trend, momentum, structure, signal, snap.Regime);
+
+        // ── 5b. Breakout confidence boost — aligned dengan signal final
+        if (breakout.Direction != BreakoutDirection.None &&
+            ((breakout.Direction == BreakoutDirection.Bullish && signal == SignalDirection.BUY) ||
+             (breakout.Direction == BreakoutDirection.Bearish && signal == SignalDirection.SELL)))
+        {
+            // Boost 0.05 weak (1-3 pip), 0.10 strong (>3 pip beyond level)
+            decimal boost = breakout.PipsBeyond >= 3m ? 0.10m : 0.05m;
+            confidenceScore = Math.Min(confidenceScore + boost, 0.95m);
+            confluenceScore = Math.Min(confluenceScore + (breakout.PipsBeyond >= 3m ? 8 : 4), 100);
+        }
 
         // ── 4e. Nano-mode extra vetos — STRICT quality threshold untuk modal kecil ─
         // Modal real <$100 = 5% per trade unavoidable (broker min lot). Untuk kompensasi,

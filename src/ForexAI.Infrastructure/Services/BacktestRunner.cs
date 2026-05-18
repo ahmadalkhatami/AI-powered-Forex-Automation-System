@@ -88,7 +88,7 @@ public class BacktestRunner
         // Stub sistem state: cooldown disabled untuk backtest (kita backtest fresh tanpa loss history).
         var stateStub   = new BacktestSystemStateStub();
         var modeStub    = new BacktestModeServiceStub();
-        var analyzer    = new LiveSignalAnalyzer(brokerStub, stateStub, modeStub);
+        var analyzer    = new LiveSignalAnalyzer(brokerStub, stateStub, modeStub, _feed);
 
         var trades        = new List<BacktestTrade>();
         var equityCurve   = new List<EquityPoint> { new(candles[50].Time, p.StartingEquity) };

@@ -66,38 +66,81 @@ export function ChartDrawingOverlay({
   // Apakah kursor di atas endpoint drawing terpilih (cursor → grab)
   const [hoveringEndpoint, setHoveringEndpoint] = useState(false)
 
-  // Konversi data point → pixel coord
+  // Helper: bar duration (seconds) — dari 2 candle terakhir
+  const barDuration = useCallback((): number | null => {
+    if (candles.length < 2) return null
+    const last = candles[candles.length - 1].time as number
+    const prev = candles[candles.length - 2].time as number
+    return last - prev
+  }, [candles])
+
+  // Konversi data point → pixel coord.
+  //
+  // Kalau time DI LUAR data range (drawing yg di-anchor di future area, kanan
+  // candle aktif), timeToCoordinate return null. Fix: extrapolate dari last
+  // candle pakai pixel-per-bar yg dihitung dari 2 candle terakhir.
   const dataToPixel = useCallback(
     (point: DrawingPoint): { x: number; y: number } | null => {
       if (!chart || !series) return null
-      const x = chart.timeScale().timeToCoordinate(point.time as UTCTimestamp)
       const y = series.priceToCoordinate(point.price)
-      if (x === null || y === null) return null
+      if (y === null) return null
+
+      let x = chart.timeScale().timeToCoordinate(point.time as UTCTimestamp) as number | null
+
+      if (x === null && candles.length >= 2) {
+        const barDur = barDuration()
+        if (barDur && barDur > 0) {
+          const lastTime = candles[candles.length - 1].time as number
+          const lastPx = chart.timeScale().timeToCoordinate(lastTime as UTCTimestamp)
+          const prevPx = chart.timeScale().timeToCoordinate(candles[candles.length - 2].time as UTCTimestamp)
+          if (lastPx !== null && prevPx !== null) {
+            const pxPerBar = (lastPx as number) - (prevPx as number)
+            const barGap = (point.time - lastTime) / barDur
+            x = (lastPx as number) + barGap * pxPerBar
+          }
+        }
+      }
+
+      if (x === null) return null
       return { x, y }
     },
-    [chart, series],
+    [chart, series, candles, barDuration],
   )
 
   // Konversi pixel → data point.
   //
   // coordinateToTime(px) return null kalau px di KANAN candle terakhir (area
   // "future" kosong sebelum price scale axis) → user gabisa kasih indikator
-  // di sebelah kanan candle aktif. Fix: extrapolate time dari logical index
-  // (yang selalu return value walau di luar data range) × bar duration.
+  // di sebelah kanan candle aktif. Fix: try logical first (kalau lightweight-
+  // charts kasih logical extrapolation), fallback ke pixel-based extrapolation.
   const pixelToData = useCallback(
     (px: number, py: number): DrawingPoint | null => {
       if (!chart || !series) return null
       let time = chart.timeScale().coordinateToTime(px) as Time | null
 
       if (time === null && candles.length >= 2) {
+        const barDur = barDuration()
+        const lastTime = candles[candles.length - 1].time as number
+
+        // Approach 1: logical-based
         const logical = chart.timeScale().coordinateToLogical(px)
-        if (logical !== null) {
-          const lastIdx = candles.length - 1
-          const lastTime = candles[lastIdx].time as number
-          const barDur = (candles[lastIdx].time as number) - (candles[lastIdx - 1].time as number)
-          // logical = 0-indexed dari candle pertama; gap dari last candle ke kanan
-          const gap = (logical as number) - lastIdx
+        if (logical !== null && barDur && barDur > 0) {
+          const gap = (logical as number) - (candles.length - 1)
           time = (lastTime + gap * barDur) as Time
+        }
+
+        // Approach 2 (fallback): pixel-based extrapolation
+        if (time === null && barDur && barDur > 0) {
+          const lastPx = chart.timeScale().timeToCoordinate(lastTime as UTCTimestamp)
+          const prevPx = chart.timeScale().timeToCoordinate(candles[candles.length - 2].time as UTCTimestamp)
+          if (lastPx !== null && prevPx !== null) {
+            const pxPerBar = (lastPx as number) - (prevPx as number)
+            if (pxPerBar > 0) {
+              const pxGap = px - (lastPx as number)
+              const barGap = pxGap / pxPerBar
+              time = (lastTime + barGap * barDur) as Time
+            }
+          }
         }
       }
 
@@ -105,7 +148,7 @@ export function ChartDrawingOverlay({
       if (time === null || price === null || typeof time !== 'number') return null
       return { time: time as number, price }
     },
-    [chart, series, candles],
+    [chart, series, candles, barDuration],
   )
 
   // Render semua drawing + preview ke canvas

@@ -83,6 +83,12 @@ public class JsonSignalRepository : ISignalRepository
         return dto is null ? null : DtoMapper.ToDomain(dto);
     }
 
+    public async Task<IReadOnlyList<TradeSignal>> GetAllAsync()
+    {
+        var all = await LoadAllAsync();
+        return all.Select(DtoMapper.ToDomain).ToList();
+    }
+
     public async Task SaveAsync(TradeSignal signal)
     {
         await _writeLock.WaitAsync();

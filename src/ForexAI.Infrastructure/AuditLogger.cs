@@ -21,21 +21,25 @@ public class AuditLogger
 {
     private const int MaxEvents = 10_000;
     private readonly IModeService _mode;
+    private readonly string? _pathOverride;
     private readonly object _lock = new();
 
     private string _path
     {
         get
         {
+            // Test factories pass pathOverride untuk hindari pollute audit-log produksi.
+            if (_pathOverride is not null) return _pathOverride;
             var dir = ProjectPaths.GetImplementationArtifactsDir(_mode.CurrentMode);
             Directory.CreateDirectory(dir);
             return Path.Combine(dir, "audit-log.jsonl");
         }
     }
 
-    public AuditLogger(IModeService mode)
+    public AuditLogger(IModeService mode, string? pathOverride = null)
     {
         _mode = mode;
+        _pathOverride = pathOverride;
         _mode.ModeChanged += (_, _) => TruncateIfTooLarge();
         TruncateIfTooLarge();
     }

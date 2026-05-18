@@ -1,4 +1,5 @@
 using ForexAI.Domain.Interfaces;
+using ForexAI.Infrastructure;
 using ForexAI.Infrastructure.Persistence.Repositories;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -11,6 +12,8 @@ public class ForexApiFactory : WebApplicationFactory<Program>
     // Isolated temp files — each test class gets fresh state, nothing bleeds into real execution-log.json
     private readonly string _positionsFile = Path.GetTempFileName();
     private readonly string _signalsFile = Path.GetTempFileName();
+    // Audit log isolated juga — tanpa override, test akan polute data/demo/audit-log.jsonl
+    private readonly string _auditFile = Path.GetTempFileName();
 
     static ForexApiFactory()
     {
@@ -47,6 +50,12 @@ public class ForexApiFactory : WebApplicationFactory<Program>
             // Replace live MIFX market data with deterministic fakes so tests don't depend on broker EA
             services.AddTransient<IMarketDataService, FakeMarketDataService>();
             services.AddTransient<ICandleDataService>(_ => new NullCandleDataService());
+
+            // Replace AuditLogger dengan instance temp-file — tanpa ini, integration test
+            // akan polute data/demo/audit-log.jsonl produksi (FakeMarketDataService entry
+            // 1.0850 muncul di dashboard audit user).
+            services.AddSingleton<AuditLogger>(sp =>
+                new AuditLogger(sp.GetRequiredService<IModeService>(), _auditFile));
         });
     }
 
@@ -57,6 +66,7 @@ public class ForexApiFactory : WebApplicationFactory<Program>
         {
             if (File.Exists(_positionsFile)) File.Delete(_positionsFile);
             if (File.Exists(_signalsFile)) File.Delete(_signalsFile);
+            if (File.Exists(_auditFile)) File.Delete(_auditFile);
         }
     }
 

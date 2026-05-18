@@ -13,7 +13,9 @@ public record AnalyticsResult(
     IReadOnlyList<BucketStats> ByConfidenceBand,    // 60-70, 70-80, 80+
     IReadOnlyList<BucketStats> ByRegime,            // Trending, Transitional, Ranging
     IReadOnlyList<BucketStats> BySession,           // London, NY, Tokyo, Sydney, Closed
-    IReadOnlyList<BucketStats> ByTimeframe          // M15, H1, D1
+    IReadOnlyList<BucketStats> ByTimeframe,         // M15, H1, D1
+    IReadOnlyList<BucketStats> ByPattern,           // Bullish Pin Bar, Engulfing, None, ...
+    IReadOnlyList<BucketStats> BySignalSource       // "MA Cross" vs "Breakout Promoted"
 );
 
 /// <summary>Performance bucket — group by attribute, hitung win rate + expectancy.</summary>

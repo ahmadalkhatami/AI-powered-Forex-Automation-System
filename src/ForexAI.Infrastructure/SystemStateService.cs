@@ -34,6 +34,10 @@ public class SystemStateService : ISystemStateService
     public decimal NanoMaxDailyLossUsd { get; private set; } = 5m;
     public decimal NanoEquityFloorUsd  { get; private set; } = 20m;
 
+    // Weekly drawdown cap — halt kalau realized loss rolling 7 hari > N% equity.
+    // Protects against multi-day catastrophic losing streak yang lolos daily cap.
+    public decimal MaxWeeklyDrawdownPct { get; private set; } = 0.05m;  // 5%
+
     private readonly IModeService _mode;
     private readonly object _lock = new();
 
@@ -100,6 +104,32 @@ public class SystemStateService : ISystemStateService
         }
     }
 
+    /// <summary>
+    /// Update config nilai-nilai yang exposed via Settings UI. Persist atomically.
+    /// Null parameter = jangan ubah field tersebut.
+    /// </summary>
+    public void UpdateConfig(
+        decimal? maxSpreadPips = null,
+        int? maxConsecutiveLosses = null,
+        int? maxHoldingMinutes = null,
+        int? cooldownMinutes = null,
+        decimal? nanoMaxDailyLossUsd = null,
+        decimal? nanoEquityFloorUsd = null,
+        decimal? maxWeeklyDrawdownPct = null)
+    {
+        lock (_lock)
+        {
+            if (maxSpreadPips         is decimal m1 && m1 > 0m) MaxSpreadPips         = m1;
+            if (maxConsecutiveLosses  is int     m2 && m2 > 0)  MaxConsecutiveLosses  = m2;
+            if (maxHoldingMinutes     is int     m3 && m3 > 0)  MaxHoldingMinutes     = m3;
+            if (cooldownMinutes       is int     m4 && m4 >= 0) CooldownMinutes       = m4;
+            if (nanoMaxDailyLossUsd   is decimal m5 && m5 > 0m) NanoMaxDailyLossUsd   = m5;
+            if (nanoEquityFloorUsd    is decimal m6 && m6 > 0m) NanoEquityFloorUsd    = m6;
+            if (maxWeeklyDrawdownPct  is decimal m7 && m7 > 0m && m7 <= 0.5m) MaxWeeklyDrawdownPct = m7;
+            Save_NoLock();
+        }
+    }
+
     public bool IsInCooldown(SignalDirection direction, out int minutesRemaining)
     {
         minutesRemaining = 0;
@@ -123,7 +153,8 @@ public class SystemStateService : ISystemStateService
         DateTimeOffset? LastLossAt = null,
         int CooldownMinutes = 30,
         decimal NanoMaxDailyLossUsd = 5m,
-        decimal NanoEquityFloorUsd  = 20m);
+        decimal NanoEquityFloorUsd  = 20m,
+        decimal MaxWeeklyDrawdownPct = 0.05m);
 
     private void Save_NoLock()
     {
@@ -133,7 +164,7 @@ public class SystemStateService : ISystemStateService
                 IsHalted, HaltReason, HaltedAt,
                 MaxSpreadPips, MaxConsecutiveLosses, MaxHoldingMinutes,
                 LastLossDirection, LastLossAt, CooldownMinutes,
-                NanoMaxDailyLossUsd, NanoEquityFloorUsd);
+                NanoMaxDailyLossUsd, NanoEquityFloorUsd, MaxWeeklyDrawdownPct);
             var json = JsonSerializer.Serialize(snap, new JsonSerializerOptions { WriteIndented = true });
             var path = PersistPath;
             var tmp  = path + ".tmp";
@@ -164,6 +195,7 @@ public class SystemStateService : ISystemStateService
                 CooldownMinutes      = snap.CooldownMinutes > 0 ? snap.CooldownMinutes : 30;
                 NanoMaxDailyLossUsd  = snap.NanoMaxDailyLossUsd > 0m ? snap.NanoMaxDailyLossUsd : 5m;
                 NanoEquityFloorUsd   = snap.NanoEquityFloorUsd  > 0m ? snap.NanoEquityFloorUsd  : 20m;
+                MaxWeeklyDrawdownPct = snap.MaxWeeklyDrawdownPct > 0m ? snap.MaxWeeklyDrawdownPct : 0.05m;
             }
         }
         catch { /* corrupt — ignore */ }

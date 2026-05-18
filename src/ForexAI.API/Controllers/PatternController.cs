@@ -48,6 +48,37 @@ public class PatternController : ControllerBase
         var times = candles.TakeLast(candleCount).Select(c => c.Time).ToArray();
         return new TimeframePattern(pat.Name, pat.Bias, pat.Reliability, pat.Description, times);
     }
+
+    /// <summary>
+    /// Fair Value Gap (FVG) detection per-TF. Return semua zone yang formed dalam
+    /// 50 bar terakhir, dengan flag filled/unfilled. Unfilled FVG = actionable level.
+    /// </summary>
+    [HttpGet("fvg")]
+    public ActionResult<FvgDetectionResponse> Fvg([FromQuery] string pair = "EURUSD")
+    {
+        var result = new FvgDetectionResponse(
+            Pair: pair,
+            M15: DetectFvgForTimeframe(pair, "M15"),
+            H1:  DetectFvgForTimeframe(pair, "H1"),
+            D1:  DetectFvgForTimeframe(pair, "D1"));
+        return Ok(result);
+    }
+
+    private FvgZoneDto[] DetectFvgForTimeframe(string pair, string timeframe)
+    {
+        var candles = _candleFeed.Get(pair, timeframe, 60);
+        if (candles.Count < 3) return Array.Empty<FvgZoneDto>();
+
+        var zones = FairValueGapDetector.Detect(candles);
+        return zones.Select(z => new FvgZoneDto(
+            Bias: z.Bias,
+            Top: z.Top,
+            Bottom: z.Bottom,
+            FormedAt: z.FormedAt,
+            ExpiresAfter: z.ExpiresAfter,
+            Filled: z.Filled,
+            SizePips: z.SizePips)).ToArray();
+    }
 }
 
 public record PatternDetectionResponse(
@@ -62,3 +93,18 @@ public record TimeframePattern(
     decimal Reliability,
     string Description,
     long[] CandleTimes);
+
+public record FvgDetectionResponse(
+    string Pair,
+    FvgZoneDto[] M15,
+    FvgZoneDto[] H1,
+    FvgZoneDto[] D1);
+
+public record FvgZoneDto(
+    string Bias,
+    decimal Top,
+    decimal Bottom,
+    long FormedAt,
+    long ExpiresAfter,
+    bool Filled,
+    decimal SizePips);

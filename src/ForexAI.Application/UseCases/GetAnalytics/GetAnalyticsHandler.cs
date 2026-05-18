@@ -26,6 +26,7 @@ public class GetAnalyticsHandler : IRequestHandler<GetAnalyticsQuery, AnalyticsR
         {
             return new AnalyticsResult(0, 0, 0, 0m, 0m, 0m, 0m, 0m, 0m,
                 Array.Empty<BucketStats>(), Array.Empty<BucketStats>(),
+                Array.Empty<BucketStats>(), Array.Empty<BucketStats>(),
                 Array.Empty<BucketStats>(), Array.Empty<BucketStats>());
         }
 
@@ -88,6 +89,31 @@ public class GetAnalyticsHandler : IRequestHandler<GetAnalyticsQuery, AnalyticsR
             if (bucket.Count > 0) AddConfBucket(tfBuckets, tf, bucket);
         }
 
+        // ── Bucket: by candle pattern detected ──────────────────────────────
+        // Group trade berdasarkan pattern yang ada saat signal di-trigger.
+        // Validate apakah pattern detection (recently added) actually meningkatkan win rate.
+        var patternBuckets = new List<BucketStats>();
+        var byPattern = withConfidence
+            .GroupBy(x => string.IsNullOrEmpty(x.Signal!.Structure.CandlePattern) ? "None" : x.Signal.Structure.CandlePattern)
+            .Where(g => g.Count() >= 1);
+        foreach (var g in byPattern)
+        {
+            AddConfBucket(patternBuckets, g.Key, g.Select(x => x.Position));
+        }
+
+        // ── Bucket: by signal source — MA Cross vs Breakout Promoted ────────
+        // Validate apakah breakout detection (recently added) menghasilkan trade berkualitas.
+        // Detect dari warnings: kalau ada "BREAKOUT BUY:" atau "BREAKOUT SELL:" → promoted from HOLD.
+        var sourceBuckets = new List<BucketStats>();
+        var byBreakout = withConfidence
+            .Where(x => x.Signal!.Warnings.Any(w => w.Contains("BREAKOUT BUY:") || w.Contains("BREAKOUT SELL:")))
+            .Select(x => x.Position).ToList();
+        var byMaCross = withConfidence
+            .Where(x => !x.Signal!.Warnings.Any(w => w.Contains("BREAKOUT BUY:") || w.Contains("BREAKOUT SELL:")))
+            .Select(x => x.Position).ToList();
+        if (byBreakout.Count > 0) AddConfBucket(sourceBuckets, "Breakout Promoted", byBreakout);
+        if (byMaCross.Count > 0)  AddConfBucket(sourceBuckets, "MA Cross (standard)", byMaCross);
+
         return new AnalyticsResult(
             TotalTrades:   closed.Count,
             WinCount:      wins.Count,
@@ -101,7 +127,9 @@ public class GetAnalyticsHandler : IRequestHandler<GetAnalyticsQuery, AnalyticsR
             ByConfidenceBand: confBuckets,
             ByRegime:         regimeBuckets,
             BySession:        sessionBuckets,
-            ByTimeframe:      tfBuckets);
+            ByTimeframe:      tfBuckets,
+            ByPattern:        patternBuckets,
+            BySignalSource:   sourceBuckets);
     }
 
     private static void AddConfBucket(List<BucketStats> sink, string label, IEnumerable<TradePosition> items)

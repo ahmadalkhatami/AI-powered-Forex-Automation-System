@@ -356,11 +356,21 @@ internal class BacktestSystemStateStub : ISystemStateService
     public int CooldownMinutes => 0;  // disabled untuk backtest
     public decimal NanoMaxDailyLossUsd => 0m;  // disabled untuk backtest
     public decimal NanoEquityFloorUsd  => 0m;
+    public decimal MaxWeeklyDrawdownPct => 0m;  // disabled untuk backtest
 
     public void Halt(string reason) { }
     public void Resume() { }
     public void RegisterLoss(SignalDirection direction) { }
     public bool IsInCooldown(SignalDirection direction, out int minutesRemaining) { minutesRemaining = 0; return false; }
+
+    public void UpdateConfig(
+        decimal? maxSpreadPips = null,
+        int? maxConsecutiveLosses = null,
+        int? maxHoldingMinutes = null,
+        int? cooldownMinutes = null,
+        decimal? nanoMaxDailyLossUsd = null,
+        decimal? nanoEquityFloorUsd = null,
+        decimal? maxWeeklyDrawdownPct = null) { /* no-op for backtest stub */ }
 }
 
 /// <summary>

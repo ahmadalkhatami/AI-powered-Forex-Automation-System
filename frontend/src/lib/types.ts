@@ -251,6 +251,29 @@ export interface PatternResponse {
   d1: TimeframePattern
 }
 
+// ── Settings (backend /api/settings) ────────────────────────────────────
+export interface SettingsResponse {
+  maxSpreadPips: number
+  maxConsecutiveLosses: number
+  maxHoldingMinutes: number
+  cooldownMinutes: number
+  nanoMaxDailyLossUsd: number
+  nanoEquityFloorUsd: number
+  maxWeeklyDrawdownPct: number
+  isHalted: boolean
+  haltReason: string | null
+}
+
+export interface SettingsUpdateRequest {
+  maxSpreadPips?: number
+  maxConsecutiveLosses?: number
+  maxHoldingMinutes?: number
+  cooldownMinutes?: number
+  nanoMaxDailyLossUsd?: number
+  nanoEquityFloorUsd?: number
+  maxWeeklyDrawdownPct?: number
+}
+
 export interface SignalHeroData {
   id: string
   pair: string

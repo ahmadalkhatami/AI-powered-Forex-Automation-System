@@ -26,8 +26,20 @@ public interface ISystemStateService
     decimal          NanoMaxDailyLossUsd { get; }   // auto-halt kalau today's PnL <= -nilai ini
     decimal          NanoEquityFloorUsd  { get; }   // auto-halt PERMANENT kalau equity <= nilai ini
 
+    // Weekly drawdown cap — halt kalau realized loss rolling 7 hari > N% equity (default 5%)
+    decimal          MaxWeeklyDrawdownPct { get; }
+
     void Halt(string reason);
     void Resume();
     void RegisterLoss(SignalDirection direction);
     bool IsInCooldown(SignalDirection direction, out int minutesRemaining);
+
+    void UpdateConfig(
+        decimal? maxSpreadPips = null,
+        int? maxConsecutiveLosses = null,
+        int? maxHoldingMinutes = null,
+        int? cooldownMinutes = null,
+        decimal? nanoMaxDailyLossUsd = null,
+        decimal? nanoEquityFloorUsd = null,
+        decimal? maxWeeklyDrawdownPct = null);
 }

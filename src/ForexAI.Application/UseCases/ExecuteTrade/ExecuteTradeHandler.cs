@@ -187,6 +187,29 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
             return skipped;
         }
 
+        // Weekly drawdown cap — protect dari multi-day catastrophic losing streak.
+        // Hitung total realized PnL untuk closed positions dalam 7 hari terakhir.
+        if (_systemState.MaxWeeklyDrawdownPct > 0m && currentEquity > 0m)
+        {
+            var weekAgo = DateTimeOffset.UtcNow.AddDays(-7);
+            var weeklyClosed = recentClosed.Where(p =>
+                p.ClosedAt.HasValue && p.ClosedAt.Value >= weekAgo).ToList();
+            decimal weeklyPnl = weeklyClosed.Sum(p => p.FloatingPnl);
+            if (weeklyPnl < 0m)
+            {
+                decimal weeklyLossPct = Math.Abs(weeklyPnl) / currentEquity;
+                if (weeklyLossPct >= _systemState.MaxWeeklyDrawdownPct)
+                {
+                    var msg = $"WEEKLY DD CAP: realized loss ${weeklyPnl:F2} = {weeklyLossPct:P1} >= {_systemState.MaxWeeklyDrawdownPct:P0} dalam 7 hari. Auto-halt sampai user review.";
+                    _logger.LogCritical(msg);
+                    _systemState.Halt(msg);
+                    var skipped = TradePosition.CreateSkipped(tradeId, signal.RunId, signal.Pair, msg);
+                    await _positions.SaveAsync(skipped);
+                    return skipped;
+                }
+            }
+        }
+
         // Tier-aware: dapatkan tier dulu untuk hitung risk limit + handle Nano override
         var tier = RiskTier.FromEquity(currentEquity, _mode.CurrentMode);
         var p = request.RiskValidation.ValidatedParameters!;

@@ -47,6 +47,12 @@ export function Header() {
         >
           Backtest
         </Link>
+        <Link
+          href="/settings"
+          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Settings
+        </Link>
         <button
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           className="p-2 rounded-md hover:bg-muted transition-colors"

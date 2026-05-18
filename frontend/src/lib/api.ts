@@ -14,6 +14,8 @@ import type {
   BacktestRunRequest,
   BacktestResult,
   PatternResponse,
+  SettingsResponse,
+  SettingsUpdateRequest,
 } from '@/lib/types'
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -161,4 +163,16 @@ export async function runBacktest(req: BacktestRunRequest): Promise<BacktestResu
 // ── Candlestick pattern detection (per-TF) ──────────────────────────────
 export async function fetchPatterns(pair: string = 'EURUSD'): Promise<PatternResponse> {
   return fetchApi(`/api/pattern/detect?pair=${encodeURIComponent(pair)}`)
+}
+
+// ── Settings (safety thresholds config) ─────────────────────────────────
+export async function getSettings(): Promise<SettingsResponse> {
+  return fetchApi('/api/settings')
+}
+
+export async function updateSettings(req: SettingsUpdateRequest): Promise<SettingsResponse> {
+  return fetchApi('/api/settings', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
 }

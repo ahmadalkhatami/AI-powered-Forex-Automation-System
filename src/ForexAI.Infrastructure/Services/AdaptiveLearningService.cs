@@ -67,6 +67,12 @@ public class AdaptiveLearningService : BackgroundService
     private static readonly TimeSpan PatternDisableDuration = TimeSpan.FromDays(30);
     private static readonly TimeSpan PatternActionCool      = TimeSpan.FromDays(30);
 
+    // Regression detector (per roadmap § 9 safeguard)
+    private const int     RegressionMinSample   = 10;     // butuh ≥ 10 trade post-adjust
+    private const decimal RegressionExpectancyR = 0m;     // expectancy R < 0 → revert
+    private static readonly TimeSpan RegressionLookback     = TimeSpan.FromDays(7);   // only check audit ≤ 7d old
+    private static readonly TimeSpan RegressionMinAge       = TimeSpan.FromHours(6);  // butuh ≥ 6h sejak adjust untuk fair sample
+
     private readonly IServiceProvider _services;
     private readonly IAdaptiveStateService _adaptive;
     private readonly ILogger<AdaptiveLearningService> _log;
@@ -120,6 +126,15 @@ public class AdaptiveLearningService : BackgroundService
                 "Adaptive cycle: global gate CLOSED (totalTradeCount={Total} < 50) — observe only",
                 stats.TotalTradeCount);
             return;
+        }
+
+        // ── Performance regression detector — auto-revert latest adjustment
+        //    kalau post-adjust expectancy negatif (artinya adjustment malah merugikan).
+        //    Run BEFORE evaluate new actions supaya bad adjustment di-rollback dulu.
+        using (var regScope = _services.CreateScope())
+        {
+            var repo = regScope.ServiceProvider.GetRequiredService<ITradePositionRepository>();
+            await CheckRegressionAndRevertAsync(repo, _adaptive.Current);
         }
 
         // ── Action 1: Per-regime confidence threshold ──────────────────────
@@ -469,6 +484,83 @@ public class AdaptiveLearningService : BackgroundService
             _log.LogWarning(
                 "🤖 Adaptive ACTION fired: PatternDisable[{Pattern}] until {Until} — {Reason} (snapshot={Snap})",
                 bucket.Label, disableUntil, reason, snapId);
+        }
+    }
+
+    /// <summary>
+    /// Performance regression detector: kalau adjustment terbaru (≤ 7 hari, ≥ 6 jam)
+    /// diikuti oleh ≥ 10 trade dengan expectancy R negatif, auto-revert via rollback
+    /// ke snapshot before-state. Mencegah Adaptive Engine "chase market" ke arah yang salah.
+    ///
+    /// <para>Skip "Revert" entries (jangan revert revert). Hanya satu revert per cycle
+    /// untuk avoid cascade.</para>
+    /// </summary>
+    private async Task CheckRegressionAndRevertAsync(ITradePositionRepository repo, AdaptiveState state)
+    {
+        // Find latest substantive audit entry (non-Revert)
+        var latest = state.AuditHistory.FirstOrDefault(a => a.Action != "Revert");
+        if (latest is null) return;
+
+        var age = DateTimeOffset.UtcNow - latest.Timestamp;
+        if (age < RegressionMinAge)
+        {
+            _log.LogInformation(
+                "Adaptive regression check: latest adjust {Action}[{Bucket}] too recent ({Age:F1}h < {Min}h) — skip",
+                latest.Action, latest.Bucket, age.TotalHours, RegressionMinAge.TotalHours);
+            return;
+        }
+        if (age > RegressionLookback)
+        {
+            _log.LogInformation(
+                "Adaptive regression check: latest adjust {Action}[{Bucket}] too old ({Age:F1}d > {Max}d) — skip",
+                latest.Action, latest.Bucket, age.TotalDays, RegressionLookback.TotalDays);
+            return;
+        }
+
+        var all = await repo.GetAllAsync();
+        var postAdjust = all
+            .Where(p => (p.Status == TradeStatus.CLOSED_WIN || p.Status == TradeStatus.CLOSED_LOSS)
+                     && p.ClosedAt.HasValue
+                     && p.ClosedAt.Value > latest.Timestamp)
+            .ToList();
+
+        if (postAdjust.Count < RegressionMinSample)
+        {
+            _log.LogInformation(
+                "Adaptive regression check: only {N} post-adjust trades (need ≥ {Min}) — skip",
+                postAdjust.Count, RegressionMinSample);
+            return;
+        }
+
+        decimal totalPnl = postAdjust.Sum(p => p.FloatingPnl);
+        decimal totalRisk = postAdjust.Where(p => p.RiskAmount > 0m).Sum(p => p.RiskAmount);
+        decimal expectancyR = totalRisk > 0m ? totalPnl / totalRisk : 0m;
+
+        if (expectancyR >= RegressionExpectancyR)
+        {
+            _log.LogInformation(
+                "Adaptive regression check: post-adjust expectancy {ExpR:F2}R ≥ 0, no revert (n={N})",
+                expectancyR, postAdjust.Count);
+            return;
+        }
+
+        // Trigger auto-revert
+        _log.LogWarning(
+            "🔥 Adaptive REGRESSION DETECTED: {Action}[{Bucket}] caused expectancy {ExpR:F2}R over {N} trade — auto-revert to snapshot {Snap}",
+            latest.Action, latest.Bucket, expectancyR, postAdjust.Count, latest.SnapshotId);
+
+        bool ok = _adaptive.Rollback(latest.SnapshotId, "AutoRevert-RegressionDetector");
+        if (ok)
+        {
+            _log.LogWarning(
+                "🤖 Adaptive AUTO-REVERT executed: rolled back {Action}[{Bucket}] (expectancy {ExpR:F2}R over {N} trade)",
+                latest.Action, latest.Bucket, expectancyR, postAdjust.Count);
+        }
+        else
+        {
+            _log.LogError(
+                "Adaptive AUTO-REVERT FAILED: snapshot {Snap} could not be restored — manual intervention needed",
+                latest.SnapshotId);
         }
     }
 }

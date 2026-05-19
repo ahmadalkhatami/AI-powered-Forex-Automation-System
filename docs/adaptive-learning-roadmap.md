@@ -389,7 +389,7 @@ Update setiap milestone selesai. Checkbox = done.
 - [x] Action 2: Session penalty/skip (with auto re-enable timer 7d) — commit 98238ff
 - [x] Action 3: Cooldown length adaptation per direction
 - [x] Action 4: Pattern enable/disable (with auto re-enable timer 30d)
-- [ ] Performance regression detector — auto-revert
+- [x] Performance regression detector — auto-revert (P2c1)
 - [ ] Frontend: adjustment history timeline + per-action kill switch + rollback button
 - [ ] 6 minggu live — validate edge improvement
 

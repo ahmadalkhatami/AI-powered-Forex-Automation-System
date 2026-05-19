@@ -14,6 +14,7 @@ import type {
   BacktestRunRequest,
   BacktestResult,
   PatternResponse,
+  FvgDetectionResponse,
   SettingsResponse,
   SettingsUpdateRequest,
   AdaptiveStatsResponse,
@@ -167,6 +168,11 @@ export async function runBacktest(req: BacktestRunRequest): Promise<BacktestResu
 // ── Candlestick pattern detection (per-TF) ──────────────────────────────
 export async function fetchPatterns(pair: string = 'EURUSD'): Promise<PatternResponse> {
   return fetchApi(`/api/pattern/detect?pair=${encodeURIComponent(pair)}`)
+}
+
+// ── Fair Value Gap (FVG) zones per-TF ───────────────────────────────────
+export async function fetchFvg(pair: string = 'EURUSD'): Promise<FvgDetectionResponse> {
+  return fetchApi(`/api/pattern/fvg?pair=${encodeURIComponent(pair)}`)
 }
 
 // ── Settings (safety thresholds config) ─────────────────────────────────

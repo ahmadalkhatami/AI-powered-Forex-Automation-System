@@ -31,6 +31,8 @@ import { PositionBoxOverlay, type PositionBox } from './PositionBoxOverlay'
 import { PatternHighlightOverlay } from './PatternHighlightOverlay'
 import { SupportResistanceOverlay } from './SupportResistanceOverlay'
 import { DynamicSROverlay, type SwingPoint, type Trendline } from './DynamicSROverlay'
+import { FvgOverlay } from './FvgOverlay'
+import type { FvgZoneDto } from '@/lib/types'
 import type { TimeframePattern } from '@/lib/types'
 
 interface TradeOverlay {
@@ -74,6 +76,7 @@ interface Props {
     dynamicResistance: Trendline | null
     dynamicSupport: Trendline | null
   } | null
+  fvgZones?: FvgZoneDto[] | null
   onTimeframeChange?: (tf: ChartTimeframe) => void
   isMifxConnected?: boolean
   isWideMode?: boolean
@@ -111,6 +114,7 @@ export function CandlestickChart({
   positions = [],
   pattern,
   dynamicStructure,
+  fvgZones,
   onTimeframeChange,
   isMifxConnected,
   isWideMode = false,
@@ -761,6 +765,13 @@ export function CandlestickChart({
             swingLows={dynamicStructure?.swingLows ?? []}
             dynamicResistance={dynamicStructure?.dynamicResistance ?? null}
             dynamicSupport={dynamicStructure?.dynamicSupport ?? null}
+            width={chartSize.width}
+            height={chartSize.height}
+          />
+          <FvgOverlay
+            chart={mainChartRef.current}
+            series={candleSeriesRef.current}
+            zones={fvgZones ?? []}
             width={chartSize.width}
             height={chartSize.height}
           />

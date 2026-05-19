@@ -343,6 +343,24 @@ export interface AdaptiveEffectiveResponse {
   byRegime: Record<string, number>  // e.g. { "Ranging": 0.75, "Trending": 0.70 }
 }
 
+// ── Fair Value Gap (FVG) ─────────────────────────────────────────────────
+export interface FvgZoneDto {
+  bias: 'Bullish' | 'Bearish'
+  top: number               // upper edge of gap (BUY entry zone bottom = bullish FVG top)
+  bottom: number            // lower edge
+  formedAt: number          // Unix seconds — middle candle of 3-candle pattern
+  expiresAfter: number      // Unix seconds — when zone considered stale
+  filled: boolean           // true = price has revisited and closed the gap
+  sizePips: number
+}
+
+export interface FvgDetectionResponse {
+  pair: string
+  m15: FvgZoneDto[]
+  h1: FvgZoneDto[]
+  d1: FvgZoneDto[]
+}
+
 // ── Adaptive State (current overrides + audit history) ───────────────────
 export interface AdaptiveAuditEntry {
   timestamp: string             // ISO

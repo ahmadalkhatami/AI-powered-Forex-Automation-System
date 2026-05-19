@@ -29,6 +29,7 @@ import {
   haltSystem,
   resumeSystem,
   fetchPatterns,
+  fetchFvg,
   fetchDynamicStructure,
   fetchAdaptiveEffective,
   getSettings,
@@ -49,6 +50,7 @@ import type {
   ChartTimeframe,
   MifxStatusResponse,
   PatternResponse,
+  FvgDetectionResponse,
   DynamicStructureResponse,
   TimeframePattern,
 } from '@/lib/types'
@@ -188,6 +190,7 @@ export default function DashboardPage() {
   const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('M15')
   const [chartWideMode, setChartWideMode] = useState(false)
   const [patterns, setPatterns] = useState<PatternResponse | null>(null)
+  const [fvgZones, setFvgZones] = useState<FvgDetectionResponse | null>(null)
   const [dynamicStructure, setDynamicStructure] = useState<DynamicStructureResponse | null>(null)
   // Per-regime adaptive threshold overrides — populated saat Adaptive Engine fire Action 1
   const [adaptiveRegimeOverrides, setAdaptiveRegimeOverrides] = useState<Record<string, number>>({})
@@ -332,6 +335,20 @@ export default function DashboardPage() {
     }
     fetchOnce()
     const id = setInterval(fetchOnce, 30_000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+
+  // FVG zones — poll tiap 60s (FVG relatively stable once formed, no need 30s)
+  useEffect(() => {
+    let alive = true
+    const fetchOnce = async () => {
+      try {
+        const f = await fetchFvg('EURUSD')
+        if (alive) setFvgZones(f)
+      } catch { /* silent */ }
+    }
+    fetchOnce()
+    const id = setInterval(fetchOnce, 60_000)
     return () => { alive = false; clearInterval(id) }
   }, [])
 
@@ -833,6 +850,14 @@ export default function DashboardPage() {
     chartTimeframe === 'D1'  ? patterns.d1  :
     null
 
+  // FVG zones untuk TF aktif
+  const activeFvgZones =
+    fvgZones === null ? [] :
+    chartTimeframe === 'M15' ? fvgZones.m15 :
+    chartTimeframe === 'H1'  ? fvgZones.h1  :
+    chartTimeframe === 'D1'  ? fvgZones.d1  :
+    []
+
   return (
     <div className={cn(
       'grid grid-cols-1 gap-4',
@@ -988,6 +1013,7 @@ export default function DashboardPage() {
           positions={positions}
           pattern={activePattern}
           dynamicStructure={dynamicStructure}
+          fvgZones={activeFvgZones}
           onTimeframeChange={setChartTimeframe}
           isMifxConnected={mifxStatus?.connected ?? false}
           isWideMode={chartWideMode}

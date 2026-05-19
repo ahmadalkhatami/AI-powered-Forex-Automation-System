@@ -147,7 +147,7 @@ Status legend:
 | **Auto-approve dengan dynamic threshold** | ✅ Live | Configurable via Settings UI (default 70%). Counter-D1 setup auto-bumped +5%. Manual approve always available regardless. Exec button label menampilkan threshold aktif (e.g. "Exec ≥65%"). |
 | Audit log viewer | ✅ Live | `/audit` route |
 | Backtest UI | ✅ Live | `/backtest` route |
-| FVG zone overlay on chart | 📋 Planned | Endpoint sudah ada, FE rendering belum |
+| FVG zone overlay on chart | ✅ Live | [FvgOverlay.tsx](../frontend/src/components/dashboard/FvgOverlay.tsx) — canvas overlay anchored ke formedAt → extend kanan. Unfilled FVG: semi-transparent fill + dashed edge + label badge "FVG 8p ↑/↓". Filled FVG: faded outline saja. Bullish emerald / Bearish red. Polling 60s. |
 | Settings advanced (per-strategy) | 📋 Planned | Per-pair / per-TF config |
 | Mobile responsive | 🚧 Partial | Belum di-test thorough |
 | Sound notification | 📋 Planned | Signal fire / position close audio alert |

@@ -19,6 +19,14 @@ export interface Trendline {
   slopePipsPerHour: number
 }
 
+export interface BreakEvent {
+  type: 'BOS_Bullish' | 'BOS_Bearish' | 'CHoCH_Bullish' | 'CHoCH_Bearish'
+  brokenLevel: number
+  levelFormedAt: number
+  brokenAtTime: number
+  significance: 'Major' | 'Minor'
+}
+
 interface Props {
   chart: IChartApi | null
   series: ISeriesApi<'Candlestick'> | null
@@ -26,6 +34,7 @@ interface Props {
   swingLows: SwingPoint[]
   dynamicResistance: Trendline | null
   dynamicSupport: Trendline | null
+  breakEvents: BreakEvent[]
   width: number
   height: number
 }
@@ -41,7 +50,7 @@ interface Props {
  */
 export function DynamicSROverlay({
   chart, series, swingHighs, swingLows,
-  dynamicResistance, dynamicSupport, width, height,
+  dynamicResistance, dynamicSupport, breakEvents, width, height,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -129,7 +138,76 @@ export function DynamicSROverlay({
     // Support (green): line + low pivots
     drawTrendline(dynamicSupport, '34, 197, 94', 'Dyn S')
     drawPivots(swingLows, '34, 197, 94')
-  }, [chart, series, swingHighs, swingLows, dynamicResistance, dynamicSupport, width, height])
+
+    // ── BOS / CHoCH break event markers ─────────────────────────────────
+    // Draw horizontal line dari level swing yang di-break + label badge di break point.
+    // CHoCH = reversal signal (label colored differently than BOS continuation).
+    for (const ev of breakEvents) {
+      const start = toXY(ev.levelFormedAt, ev.brokenLevel)
+      const end = toXY(ev.brokenAtTime, ev.brokenLevel)
+      if (!start || !end) continue
+
+      const isBull = ev.type.endsWith('Bullish')
+      const isChoch = ev.type.startsWith('CHoCH')
+      const rgb = isBull ? '34, 197, 94' : '239, 68, 68'
+      // CHoCH lebih bold dari BOS (reversal = lebih penting daripada continuation)
+      const lineWidth = isChoch ? 2 : 1
+      const alpha = ev.significance === 'Major' ? 0.95 : 0.7
+
+      // Horizontal line dari swing point ke break point
+      ctx.strokeStyle = `rgba(${rgb}, ${alpha})`
+      ctx.lineWidth = lineWidth
+      ctx.setLineDash([8, 3])
+      ctx.beginPath()
+      ctx.moveTo(start.x, start.y)
+      ctx.lineTo(end.x, end.y)
+      ctx.stroke()
+      ctx.setLineDash([])
+
+      // Cross/circle marker di break point
+      ctx.fillStyle = `rgba(${rgb}, 1)`
+      ctx.beginPath()
+      if (isChoch) {
+        // CHoCH = filled circle + bigger
+        ctx.arc(end.x, end.y, 5, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.strokeStyle = '#ffffff'
+        ctx.lineWidth = 1.5
+        ctx.stroke()
+      } else {
+        // BOS = smaller filled triangle pointing up (bull) or down (bear)
+        const triH = 6
+        if (isBull) {
+          ctx.moveTo(end.x, end.y - triH)
+          ctx.lineTo(end.x - 5, end.y + triH / 2)
+          ctx.lineTo(end.x + 5, end.y + triH / 2)
+        } else {
+          ctx.moveTo(end.x, end.y + triH)
+          ctx.lineTo(end.x - 5, end.y - triH / 2)
+          ctx.lineTo(end.x + 5, end.y - triH / 2)
+        }
+        ctx.closePath()
+        ctx.fill()
+      }
+
+      // Label badge
+      const labelText = ev.type.replace('_', ' ')  // "CHoCH Bullish" / "BOS Bearish"
+      ctx.font = '10px monospace'
+      const metrics = ctx.measureText(labelText)
+      const padX = 4
+      const boxW = metrics.width + padX * 2
+      const boxH = 14
+      const labelY = isBull ? end.y - 18 : end.y + 8
+      const boxX = Math.min(end.x + 8, width - boxW - 2)
+      const boxY = Math.max(2, Math.min(labelY, height - boxH - 2))
+
+      ctx.fillStyle = `rgba(${rgb}, ${alpha})`
+      ctx.fillRect(boxX, boxY, boxW, boxH)
+      ctx.fillStyle = '#ffffff'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(labelText, boxX + padX, boxY + boxH / 2)
+    }
+  }, [chart, series, swingHighs, swingLows, dynamicResistance, dynamicSupport, breakEvents, width, height])
 
   // Re-render saat pan/zoom
   useEffect(() => {

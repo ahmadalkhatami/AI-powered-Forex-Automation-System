@@ -30,7 +30,7 @@ import { ChartDrawingOverlay } from './ChartDrawingOverlay'
 import { PositionBoxOverlay, type PositionBox } from './PositionBoxOverlay'
 import { PatternHighlightOverlay } from './PatternHighlightOverlay'
 import { SupportResistanceOverlay } from './SupportResistanceOverlay'
-import { DynamicSROverlay, type SwingPoint, type Trendline } from './DynamicSROverlay'
+import { DynamicSROverlay, type SwingPoint, type Trendline, type BreakEvent } from './DynamicSROverlay'
 import { FvgOverlay } from './FvgOverlay'
 import type { FvgZoneDto } from '@/lib/types'
 import type { TimeframePattern } from '@/lib/types'
@@ -75,6 +75,7 @@ interface Props {
     swingLows: SwingPoint[]
     dynamicResistance: Trendline | null
     dynamicSupport: Trendline | null
+    breakEvents?: BreakEvent[]
   } | null
   fvgZones?: FvgZoneDto[] | null
   onTimeframeChange?: (tf: ChartTimeframe) => void
@@ -765,6 +766,7 @@ export function CandlestickChart({
             swingLows={dynamicStructure?.swingLows ?? []}
             dynamicResistance={dynamicStructure?.dynamicResistance ?? null}
             dynamicSupport={dynamicStructure?.dynamicSupport ?? null}
+            breakEvents={dynamicStructure?.breakEvents ?? []}
             width={chartSize.width}
             height={chartSize.height}
           />

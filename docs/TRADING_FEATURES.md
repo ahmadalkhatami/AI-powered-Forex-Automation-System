@@ -57,8 +57,8 @@ Status legend:
 | **Defensive SL placement** | ✅ Live | Push SL 3p beyond nearest swing level (within 5p proximity) — anti stop hunt. Lot auto-recalculate untuk maintain risk amount. |
 | **Round number magnet warning** | ✅ Live | Detect entry within ±5p dari 50/100 pip round number (e.g., 1.1700, 1.1650) — retail stop magnet, flag dengan warning |
 | Order Block (OB) | 📋 Planned | Last opposite candle before strong move — state tracking complex |
-| Break of Structure (BOS) | 📋 Planned | Swing high/low break, continuation signal |
-| Change of Character (CHoCH) | 📋 Planned | First opposite swing break, reversal signal |
+| Break of Structure (BOS) | ✅ Live | [StructureBreakDetector.cs](../src/ForexAI.Infrastructure/Services/StructureBreakDetector.cs) — close di atas latest swing high (Bullish) atau di bawah latest swing low (Bearish), CONTEXT: trend continuation. Triangle marker di chart. |
+| Change of Character (CHoCH) | ✅ Live | Same detector — close di atas latest **Lower High** (reversal up) atau di bawah latest **Higher Low** (reversal down). Circle marker (Major significance) di chart, lebih bold daripada BOS. |
 
 ### Breakout Detection (terintegrasi dengan signal)
 | Feature | Status | Notes |

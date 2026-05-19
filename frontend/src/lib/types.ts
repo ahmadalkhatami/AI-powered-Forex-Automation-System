@@ -328,6 +328,14 @@ export interface TrendlineDto {
   slopePipsPerHour: number
 }
 
+export interface BreakEventDto {
+  type: 'BOS_Bullish' | 'BOS_Bearish' | 'CHoCH_Bullish' | 'CHoCH_Bearish'
+  brokenLevel: number
+  levelFormedAt: number      // Unix seconds
+  brokenAtTime: number       // Unix seconds
+  significance: 'Major' | 'Minor'
+}
+
 export interface DynamicStructureResponse {
   pair: string
   timeframe: string
@@ -335,6 +343,7 @@ export interface DynamicStructureResponse {
   swingLows: SwingPointDto[]
   dynamicResistance: TrendlineDto | null
   dynamicSupport: TrendlineDto | null
+  breakEvents: BreakEventDto[]
 }
 
 // ── Adaptive Effective Thresholds (baseline + per-regime override) ──────

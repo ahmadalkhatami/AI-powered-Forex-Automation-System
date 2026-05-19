@@ -41,7 +41,8 @@ public class StructureController : ControllerBase
                 SwingHighs: Array.Empty<SwingPointDto>(),
                 SwingLows: Array.Empty<SwingPointDto>(),
                 DynamicResistance: null,
-                DynamicSupport: null));
+                DynamicSupport: null,
+                BreakEvents: Array.Empty<BreakEventDto>()));
         }
 
         // Lookback 80 bar — capture history yang cukup untuk trendline meaningful.
@@ -61,13 +62,23 @@ public class StructureController : ControllerBase
         var resistance = BuildTrendline(highs.TakeLast(3).ToList(), candles[^1].Time);
         var support    = BuildTrendline(lows.TakeLast(3).ToList(), candles[^1].Time);
 
+        // BOS/CHoCH detection — based on swing structure + recent candles
+        var breaks = StructureBreakDetector.Detect(swings, candles, lookbackBars: 30);
+        var breakDtos = breaks.Select(b => new BreakEventDto(
+            Type: b.Type,
+            BrokenLevel: b.BrokenLevel,
+            LevelFormedAt: b.LevelFormedAt,
+            BrokenAtTime: b.BrokenAtTime,
+            Significance: b.Significance)).ToArray();
+
         return Ok(new DynamicStructureResponse(
             Pair: pair,
             Timeframe: timeframe,
             SwingHighs: highs.TakeLast(5).ToArray(),
             SwingLows: lows.TakeLast(5).ToArray(),
             DynamicResistance: resistance,
-            DynamicSupport: support));
+            DynamicSupport: support,
+            BreakEvents: breakDtos));
     }
 
     /// <summary>
@@ -125,7 +136,8 @@ public record DynamicStructureResponse(
     SwingPointDto[] SwingHighs,
     SwingPointDto[] SwingLows,
     TrendlineDto? DynamicResistance,
-    TrendlineDto? DynamicSupport);
+    TrendlineDto? DynamicSupport,
+    BreakEventDto[] BreakEvents);
 
 public record SwingPointDto(string Type, decimal Price, long Time);
 
@@ -137,3 +149,11 @@ public record TrendlineDto(
     string Direction,        // Ascending / Descending / Flat
     string Strength,         // Strong (3+ swing aligned) / Good / Weak
     decimal SlopePipsPerHour);
+
+/// <summary>BOS / CHoCH break event detected oleh StructureBreakDetector.</summary>
+public record BreakEventDto(
+    string Type,             // BOS_Bullish / BOS_Bearish / CHoCH_Bullish / CHoCH_Bearish
+    decimal BrokenLevel,
+    long LevelFormedAt,
+    long BrokenAtTime,
+    string Significance);    // Major / Minor

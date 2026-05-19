@@ -17,6 +17,7 @@ import { SessionChip } from '@/components/dashboard/SessionChip'
 import { NewsAlertBanner } from '@/components/dashboard/NewsAlertBanner'
 import { MultiTfMaChip } from '@/components/dashboard/MultiTfMaChip'
 import { useToast } from '@/hooks/use-toast'
+import { useNotificationSound } from '@/hooks/useNotificationSound'
 import { useDashboardStream } from '@/lib/useDashboardStream'
 import {
   analyzeSignal,
@@ -184,6 +185,7 @@ function deriveActionState(
 
 export default function DashboardPage() {
   const { toast } = useToast()
+  const sound = useNotificationSound()
 
   const [pageState, setPageState] = useState<PageState>('no-signal')
   const [eaDeploying, setEaDeploying] = useState(false)
@@ -211,6 +213,7 @@ export default function DashboardPage() {
   const livePollInFlight = useRef(false)
   const lastBarTimeRef = useRef<number | null>(null)
   const notifiedSignalIdRef = useRef<string | null>(null)
+  const prevPositionsRef = useRef<Map<string, 'ACTIVE' | 'CLOSED_WIN' | 'CLOSED_LOSS' | 'SKIPPED'>>(new Map())
   const autoApprovedSignalIdRef = useRef<string | null>(null)
   const [accountHealth, setAccountHealth] = useState<AccountHealthData>({
     equity: INITIAL_EQUITY,
@@ -398,6 +401,28 @@ export default function DashboardPage() {
     const id = setInterval(fetchOnce, 60_000)
     return () => { alive = false; clearInterval(id) }
   }, [])
+
+  // Detect position auto-close (broker SL/TP hit) — play sound + toast.
+  // Comparison: prev status ACTIVE → current CLOSED_WIN/LOSS = transition fired.
+  useEffect(() => {
+    const prev = prevPositionsRef.current
+    const next = new Map<string, 'ACTIVE' | 'CLOSED_WIN' | 'CLOSED_LOSS' | 'SKIPPED'>()
+    for (const p of positions) {
+      const status = p.status as 'ACTIVE' | 'CLOSED_WIN' | 'CLOSED_LOSS' | 'SKIPPED'
+      next.set(p.tradeId, status)
+      const prevStatus = prev.get(p.tradeId)
+      if (prevStatus === 'ACTIVE' && (status === 'CLOSED_WIN' || status === 'CLOSED_LOSS')) {
+        const win = status === 'CLOSED_WIN'
+        if (win) sound.playWin(); else sound.playLoss()
+        toast({
+          title: win ? '🔔 Trade auto-closed — WIN' : '🔔 Trade auto-closed — LOSS',
+          description: `${p.pair} ${p.direction} · P&L $${p.floatingPnl.toFixed(2)} (${p.floatingPnlPips >= 0 ? '+' : ''}${p.floatingPnlPips}p)`,
+          variant: win ? 'default' : 'destructive',
+        })
+      }
+    }
+    prevPositionsRef.current = next
+  }, [positions, sound, toast])
 
   // Adaptive per-regime override — re-fetch tiap 60s (Adaptive Engine fire setiap 6h,
   // 60s polling cukup untuk pickup change).
@@ -681,6 +706,7 @@ export default function DashboardPage() {
     const conf = (rawSignal.confidenceScore * 100).toFixed(0)
     const thresholdPct = Math.round(confThreshold * 100)
     const overrideTag = regimeOverride !== undefined ? ` (adaptive ${regimeKey})` : ''
+    sound.playSignal()
     toast({
       title: '🤖 Auto-approve fire',
       description: `${rawSignal.signal} ${rawSignal.pair} · Confidence ${conf}% ≥ ${thresholdPct}%${overrideTag}${isCounterD1 ? ' counter-D1' : ''} + vetos passed — eksekusi otomatis`,
@@ -756,6 +782,7 @@ export default function DashboardPage() {
       setPositions((prev) => prev.map((p) => p.tradeId === closed.tradeId ? closed : p))
       void Promise.all([refreshPositions(), refreshAccountHealth()])
       const win = closed.status === 'CLOSED_WIN'
+      if (win) sound.playWin(); else sound.playLoss()
       toast({
         title: win ? '✅ Trade closed — WIN' : '❌ Trade closed — LOSS',
         description: `P&L $${closed.floatingPnl.toFixed(2)} (${closed.floatingPnlPips >= 0 ? '+' : ''}${closed.floatingPnlPips}p)`,
@@ -1029,6 +1056,14 @@ export default function DashboardPage() {
             </Button>
             <MultiTfMaChip snapshot={rawSignal?.snapshot} />
             <SessionChip />
+            <button
+              onClick={() => sound.setEnabled(!sound.enabled)}
+              className="p-1.5 rounded-md text-muted-foreground hover:bg-muted transition-colors"
+              title={sound.enabled ? 'Sound notifications ON — click to mute' : 'Sound notifications OFF — click to enable'}
+              aria-label="Toggle sound notifications"
+            >
+              {sound.enabled ? '🔔' : '🔕'}
+            </button>
           </div>
         </div>
 

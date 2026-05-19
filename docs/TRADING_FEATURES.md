@@ -150,7 +150,7 @@ Status legend:
 | FVG zone overlay on chart | ✅ Live | [FvgOverlay.tsx](../frontend/src/components/dashboard/FvgOverlay.tsx) — canvas overlay anchored ke formedAt → extend kanan. Unfilled FVG: semi-transparent fill + dashed edge + label badge "FVG 8p ↑/↓". Filled FVG: faded outline saja. Bullish emerald / Bearish red. Polling 60s. |
 | Settings advanced (per-strategy) | 📋 Planned | Per-pair / per-TF config |
 | Mobile responsive | 🚧 Partial | Belum di-test thorough |
-| Sound notification | 📋 Planned | Signal fire / position close audio alert |
+| Sound notification | ✅ Live | [useNotificationSound.ts](../frontend/src/hooks/useNotificationSound.ts) — Web Audio API beeps (no external assets). 3 variants: Signal (rising tone), Win (ascending major), Loss (descending square). Trigger di auto-approve fire + position close (manual + auto-close detection via state transition). Toggle 🔔/🔕 di header, persist localStorage. |
 | Multi-TF MA alignment chip | ✅ Live | [MultiTfMaChip.tsx](../frontend/src/components/dashboard/MultiTfMaChip.tsx) — header chip menampilkan arah trend per TF berdasarkan MA20 vs MA50. Format: "M15↑ H1↑ D1↑". Color emerald saat all aligned bull, red all bear, amber mixed. Hidden saat snapshot belum ada. |
 | **News calendar banner** | ✅ Live | [NewsAlertBanner.tsx](../frontend/src/components/dashboard/NewsAlertBanner.tsx) — high-impact USD/EUR event within 60 min → red banner; within 4h → amber banner. Backend [NewsCalendarService.cs](../src/ForexAI.Infrastructure/Services/NewsCalendarService.cs) fetch from Forex Factory XML feed, cache 30 min, graceful fallback kalau source down. Endpoint `/api/news/upcoming?hours=24&currency=USD,EUR`. Polling 5 menit di FE. |
 

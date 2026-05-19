@@ -94,7 +94,7 @@ export function DynamicSROverlay({
       const labelText = `${label} (${line.strength})`
       ctx.font = '10px monospace'
       const metrics = ctx.measureText(labelText)
-      const padX = 4, padY = 2
+      const padX = 4
       const boxW = metrics.width + padX * 2
       const boxH = 14
       const boxX = Math.min(b.x, width - boxW - 2)

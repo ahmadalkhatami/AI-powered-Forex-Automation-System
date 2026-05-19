@@ -387,6 +387,24 @@ export interface OrderBlockResponse {
   d1: OrderBlockDto[]
 }
 
+// ── Economic news calendar ────────────────────────────────────────────────
+export interface NewsEventDto {
+  title: string
+  currency: string                // USD / EUR / etc
+  impact: 'Low' | 'Medium' | 'High' | 'Holiday'
+  time: string                    // ISO 8601 UTC
+  forecast: string | null
+  previous: string | null
+  actual: string | null
+  minutesUntil: number            // negative = within last 30 min
+}
+
+export interface NewsResponse {
+  events: NewsEventDto[]
+  fetchError: string | null
+  fetchedAt: string
+}
+
 // ── Adaptive State (current overrides + audit history) ───────────────────
 export interface AdaptiveAuditEntry {
   timestamp: string             // ISO

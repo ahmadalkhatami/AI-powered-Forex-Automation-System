@@ -16,6 +16,7 @@ import type {
   PatternResponse,
   FvgDetectionResponse,
   OrderBlockResponse,
+  NewsResponse,
   SettingsResponse,
   SettingsUpdateRequest,
   AdaptiveStatsResponse,
@@ -179,6 +180,11 @@ export async function fetchFvg(pair: string = 'EURUSD'): Promise<FvgDetectionRes
 // ── Order Block (OB) zones per-TF ────────────────────────────────────────
 export async function fetchOrderBlocks(pair: string = 'EURUSD'): Promise<OrderBlockResponse> {
   return fetchApi(`/api/pattern/orderblock?pair=${encodeURIComponent(pair)}`)
+}
+
+// ── Economic news calendar ───────────────────────────────────────────────
+export async function fetchNews(hours = 24, currency = 'USD,EUR'): Promise<NewsResponse> {
+  return fetchApi(`/api/news/upcoming?hours=${hours}&currency=${encodeURIComponent(currency)}`)
 }
 
 // ── Settings (safety thresholds config) ─────────────────────────────────

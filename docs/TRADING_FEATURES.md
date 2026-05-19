@@ -152,6 +152,7 @@ Status legend:
 | Mobile responsive | 🚧 Partial | Belum di-test thorough |
 | Sound notification | 📋 Planned | Signal fire / position close audio alert |
 | Multi-TF MA alignment chip | 📋 Planned | Quick "M15↑ H1↑ D1↑" status indicator |
+| **News calendar banner** | ✅ Live | [NewsAlertBanner.tsx](../frontend/src/components/dashboard/NewsAlertBanner.tsx) — high-impact USD/EUR event within 60 min → red banner; within 4h → amber banner. Backend [NewsCalendarService.cs](../src/ForexAI.Infrastructure/Services/NewsCalendarService.cs) fetch from Forex Factory XML feed, cache 30 min, graceful fallback kalau source down. Endpoint `/api/news/upcoming?hours=24&currency=USD,EUR`. Polling 5 menit di FE. |
 
 ---
 
@@ -193,7 +194,7 @@ Feature yang di-evaluate tapi decide NOT implement:
 |---|---|
 | Breakout follow-through wait | Kontradiksi tujuan responsive (15min latency M15) |
 | Liquidity Trap detection (full SMC) | Overlap signifikan dengan Fakeout Filter |
-| News calendar integration | Butuh external API decision (ForexFactory/Investing/ECB) — flagged for future |
+| News calendar — alternate sources | Investing.com & ECB skipped — Forex Factory XML cukup untuk MVP. Bisa swap via appsettings `News:FeedUrl`. |
 | Real-time tick-level backtest | Tick data heavy, current approach pakai candle-based sudah cukup |
 | ML model untuk signal | Belum cukup labeled data (need 1000+ trades) — analytics dulu |
 | Crypto pair support | Focus EUR/USD dulu sampai consistent profitability |

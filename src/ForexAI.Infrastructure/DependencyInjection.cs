@@ -36,6 +36,10 @@ public static class DependencyInjection
         // Adaptive Learning Engine — BackgroundService runs every 6h
         services.AddHostedService<AdaptiveLearningService>();
 
+        // News Calendar — fetch + cache forex economic events
+        services.AddHttpClient();
+        services.AddSingleton<NewsCalendarService>();
+
         services.AddScoped<EaDeployService>();
         services.AddScoped<ITradePositionRepository, JsonTradePositionRepository>();
         services.AddScoped<ISignalRepository, JsonSignalRepository>();

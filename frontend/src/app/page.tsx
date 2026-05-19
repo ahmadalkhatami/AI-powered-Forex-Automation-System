@@ -14,6 +14,7 @@ import { PositionsList } from '@/components/dashboard/PositionsList'
 import { CandlestickChart } from '@/components/dashboard/CandlestickChart'
 import { MifxLiveTicker } from '@/components/dashboard/MifxLiveTicker'
 import { SessionChip } from '@/components/dashboard/SessionChip'
+import { NewsAlertBanner } from '@/components/dashboard/NewsAlertBanner'
 import { useToast } from '@/hooks/use-toast'
 import { useDashboardStream } from '@/lib/useDashboardStream'
 import {
@@ -889,6 +890,8 @@ export default function DashboardPage() {
       chartWideMode ? 'md:grid-cols-1' : 'md:grid-cols-[65%_35%]',
     )}>
       <div className="space-y-4 pb-24 sm:pb-0">
+        {/* News alert banner — hidden saat no event imminent */}
+        <NewsAlertBanner />
         {/* Header with pair info + MIFX live ticker + trigger */}
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div className="flex items-center gap-2 flex-wrap">

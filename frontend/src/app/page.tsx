@@ -476,11 +476,11 @@ export default function DashboardPage() {
     toast({
       title: next ? '⚡ Auto-approve aktif' : '🛑 Auto-approve nonaktif',
       description: next
-        ? 'Signal lolos vetos + confidence ≥ 70% akan auto-execute'
+        ? `Signal lolos vetos + confidence ≥ ${Math.round(autoApproveMinConfidence * 100)}% akan auto-execute`
         : 'Kembali butuh klik Approve manual',
       variant: next ? 'default' : 'default',
     })
-  }, [autoApprove, toast])
+  }, [autoApprove, autoApproveMinConfidence, toast])
 
   const toggleAutoTrigger = useCallback(() => {
     const next = !autoTrigger
@@ -584,10 +584,10 @@ export default function DashboardPage() {
     }
   }, [rawSignal, riskValidation, mifxStatus, accountHealth, nanoRiskOverride, refreshPositions, refreshAccountHealth, toast])
 
-  // Auto-approve: confidence ≥ 70% (single gate, data-driven).
-  // Backtest 200 candle M15 menunjukkan vetos (structure/RSI/overextension) sudah jadi
-  // quality gate utama — filter tambahan justru buang win-win. Threshold 70% adalah
-  // sanity floor (di atas median consensus 50-65% untuk mediocre setups).
+  // Auto-approve: confidence ≥ dynamic threshold (Settings UI, default 70%).
+  // Counter-D1 setup butuh +5% extra (HTF disagreement penalty).
+  // Vetos (structure/RSI/overextension/pattern) sudah jadi quality gate utama —
+  // threshold ini sanity floor di atas median consensus untuk mediocre setups.
   useEffect(() => {
     if (!autoApprove) return
     if (!rawSignal || !riskValidation) return
@@ -603,9 +603,10 @@ export default function DashboardPage() {
 
     autoApprovedSignalIdRef.current = rawSignal.id
     const conf = (rawSignal.confidenceScore * 100).toFixed(0)
+    const thresholdPct = Math.round(confThreshold * 100)
     toast({
       title: '🤖 Auto-approve fire',
-      description: `${rawSignal.signal} ${rawSignal.pair} · Confidence ${conf}% ≥ 70% + vetos passed — eksekusi otomatis`,
+      description: `${rawSignal.signal} ${rawSignal.pair} · Confidence ${conf}% ≥ ${thresholdPct}%${isCounterD1 ? ' (counter-D1)' : ''} + vetos passed — eksekusi otomatis`,
     })
     handleApprove()
   }, [autoApprove, rawSignal, riskValidation, pageState, positions, handleApprove, toast, autoApproveMinConfidence])

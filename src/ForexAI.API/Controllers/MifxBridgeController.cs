@@ -159,8 +159,13 @@ public class MifxBridgeController : ControllerBase
         _feed.Update(tick, brokerPositions);
 
         // Sync PnL + auto-close hanya jika EA mengirim field positions (EA v1.18+)
+        // Pass equity (balance preferred kalau ada — match logic GetTrailingThresholds lama)
+        // supaya tier-resolve di sync service tidak butuh call broker async (anti deadlock).
         if (req.Positions is not null)
-            await _syncService.SyncAsync(brokerPositions ?? Array.Empty<MifxBrokerPosition>());
+        {
+            decimal syncEquity = (req.Balance ?? 0m) > 0m ? req.Balance!.Value : (req.Equity ?? 0m);
+            await _syncService.SyncAsync(brokerPositions ?? Array.Empty<MifxBrokerPosition>(), syncEquity);
+        }
 
         // Broadcast ke dashboard via SignalR — best-effort, jangan blokir EA jika error
         try

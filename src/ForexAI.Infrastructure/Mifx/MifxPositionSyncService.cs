@@ -31,42 +31,26 @@ public class MifxPositionSyncService
     // Track posisi yang sudah di-trigger breakeven/trailing close — supaya tidak double-fire
     // (ClosePositionAsync fire-and-forget, kalau close masih in-flight saat sync berikutnya
     //  kita bisa fire lagi tanpa guard ini → broker error / lot mismatch).
-    private readonly HashSet<string> _closingInProgress = new();
+    // ConcurrentDictionary supaya Add (di SyncAsync, no lock) dan Remove (di HandleCloseAsync
+    // background task) thread-safe tanpa risk race.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _closingInProgress = new();
 
     // Tier-aware threshold: nano mode (modal kecil) lebih agresif lock profit.
     // Standard: BE @ +1R, trail @ +1.5R retrace 1R
     // Nano:     BE @ +0.5R, trail @ +1R retrace 0.5R — protect tiny modal
-    // Time stop dipisah ke GetTimeStopMinutes() — per-TF, bukan global.
-    private (decimal beTrigger, decimal trailTrigger, decimal trailGiveBack) GetTrailingThresholds()
-    {
-        try
-        {
-            var account = _broker.GetAccountAsync().GetAwaiter().GetResult();
-            decimal equity = account.Balance > 0 ? account.Balance : account.Equity;
-            var tier = RiskTier.FromEquity(equity, _mode.CurrentMode);
-            if (tier.Name == "nano") return (0.5m, 1.0m, 0.5m);
-        }
-        catch { /* fallback */ }
-        return (1.0m, 1.5m, 1.0m);
-    }
+    // Tier sudah di-resolve di awal SyncAsync via equity yang dipassing dari caller —
+    // hindari sync-over-async di tick path.
+    private static (decimal beTrigger, decimal trailTrigger, decimal trailGiveBack) GetTrailingThresholds(RiskTier tier)
+        => tier.Name == "nano" ? (0.5m, 1.0m, 0.5m) : (1.0m, 1.5m, 1.0m);
 
     /// <summary>
     /// Optional time stop — return null kalau disabled (default).
     /// Nano tier tetap pakai cap 2h apapun setting (modal $30-60 safety).
     /// User dapat enable via Settings UI dengan set MaxHoldingMinutes > 0.
     /// </summary>
-    private int? GetTimeStopMinutesOptional(string? timeframe)
+    private int? GetTimeStopMinutesOptional(RiskTier tier)
     {
-        // Nano tier: always cap 2h (hard safety untuk modal kecil)
-        try
-        {
-            var account = _broker.GetAccountAsync().GetAwaiter().GetResult();
-            decimal equity = account.Balance > 0 ? account.Balance : account.Equity;
-            var tier = RiskTier.FromEquity(equity, _mode.CurrentMode);
-            if (tier.Name == "nano") return 120;
-        }
-        catch { /* fallback ke user setting */ }
-
+        if (tier.Name == "nano") return 120;
         // Non-nano: hanya enforce kalau user explicit set di Settings UI
         return _systemState.MaxHoldingMinutes > 0 ? _systemState.MaxHoldingMinutes : (int?)null;
     }
@@ -89,7 +73,9 @@ public class MifxPositionSyncService
     /// Daftar posisi open dari EA (bisa kosong = semua sudah tutup).
     /// Caller hanya memanggil ini jika EA sudah mengirim field "positions" (tidak null).
     /// </param>
-    public async Task SyncAsync(IReadOnlyList<MifxBrokerPosition> brokerPositions)
+    /// <param name="accountEquity">Equity terkini dari EA tick payload — pakai untuk resolve tier
+    /// tanpa harus call broker (sync-over-async). 0 = fallback ke standard tier thresholds.</param>
+    public async Task SyncAsync(IReadOnlyList<MifxBrokerPosition> brokerPositions, decimal accountEquity = 0m)
     {
         // Build lookup: MIFX ticket → broker position
         var byTicket = brokerPositions.ToDictionary(p => p.Ticket);
@@ -98,8 +84,9 @@ public class MifxPositionSyncService
         if (localOpen.Count == 0) return;
 
         // Tier-aware trailing thresholds (BE/trail) — apply ke semua posisi.
-        // Time stop dihitung per posisi (per-TF) di loop di bawah.
-        var (beTrigger, trailTrigger, trailGiveBack) = GetTrailingThresholds();
+        // Resolve tier sekali via equity yang di-passing dari caller (EA tick payload).
+        var tier = RiskTier.FromEquity(accountEquity > 0m ? accountEquity : 100m, _mode.CurrentMode);
+        var (beTrigger, trailTrigger, trailGiveBack) = GetTrailingThresholds(tier);
 
         var toUpdate = new List<Domain.Entities.TradePosition>();
 
@@ -119,7 +106,7 @@ public class MifxPositionSyncService
                 toUpdate.Add(local);
 
                 // Skip semua trigger close kalau sudah ada close request in-flight
-                if (_closingInProgress.Contains(local.TradeId)) continue;
+                if (_closingInProgress.ContainsKey(local.TradeId)) continue;
 
                 // ── Breakeven + Trailing stop logic ────────────────────────────
                 // Hitung current R-multiple = floating pips / original SL distance pips.
@@ -140,7 +127,7 @@ public class MifxPositionSyncService
                         _logger.LogWarning(
                             "Trailing stop fire: {Id} peakR={Peak:F2} currentR={Cur:F2} (give back ≥{Give:F1}R) — close",
                             local.TradeId, peakR, currentR, trailGiveBack);
-                        _closingInProgress.Add(local.TradeId);
+                        _closingInProgress.TryAdd(local.TradeId, 0);
                         FireCloseWithLogging(local);
                     }
                     // Breakeven trigger — setelah peak ≥ beTrigger, close kalau price reverse ke entry atau lebih buruk
@@ -149,7 +136,7 @@ public class MifxPositionSyncService
                         _logger.LogWarning(
                             "Breakeven fire: {Id} peakR={Peak:F2} currentR={Cur:F2} — price reverse ke entry, close",
                             local.TradeId, peakR, currentR);
-                        _closingInProgress.Add(local.TradeId);
+                        _closingInProgress.TryAdd(local.TradeId, 0);
                         FireCloseWithLogging(local);
                     }
                 }
@@ -160,16 +147,16 @@ public class MifxPositionSyncService
                 // Nano tier tetap pakai cap 2h apapun setting (modal protection).
                 if (local.OpenedAt.HasValue)
                 {
-                    int? hardCap = GetTimeStopMinutesOptional(local.Timeframe);
+                    int? hardCap = GetTimeStopMinutesOptional(tier);
                     if (hardCap.HasValue && hardCap.Value > 0)
                     {
                         var ageMinutes = (DateTimeOffset.UtcNow - local.OpenedAt.Value).TotalMinutes;
-                        if (ageMinutes >= hardCap.Value && !_closingInProgress.Contains(local.TradeId))
+                        if (ageMinutes >= hardCap.Value && !_closingInProgress.ContainsKey(local.TradeId))
                         {
                             _logger.LogWarning(
                                 "Time stop fire: {Id} (TF={Tf}) held {Age:F0} min ≥ {Max} min — close otomatis",
                                 local.TradeId, local.Timeframe ?? "?", ageMinutes, hardCap.Value);
-                            _closingInProgress.Add(local.TradeId);
+                            _closingInProgress.TryAdd(local.TradeId, 0);
                             FireCloseWithLogging(local);
                         }
                     }
@@ -187,7 +174,7 @@ public class MifxPositionSyncService
 
                 // Posisi tutup → bersihkan tracker state
                 _peakR.Remove(local.TradeId);
-                _closingInProgress.Remove(local.TradeId);
+                _closingInProgress.TryRemove(local.TradeId, out _);
 
                 // Post-loss cooldown: register direction yang baru saja LOSS
                 if (outcome == TradeStatus.CLOSED_LOSS)
@@ -214,7 +201,7 @@ public class MifxPositionSyncService
         foreach (var staleId in _peakR.Keys.Where(k => !openIds.Contains(k)).ToList())
         {
             _peakR.Remove(staleId);
-            _closingInProgress.Remove(staleId);
+            _closingInProgress.TryRemove(staleId, out _);
         }
     }
 
@@ -237,7 +224,7 @@ public class MifxPositionSyncService
                 _logger.LogError(
                     "Close rejected by broker for {Id}: {Reason}",
                     position.TradeId, result.ErrorMessage ?? "unknown");
-                lock (_closingInProgress) _closingInProgress.Remove(position.TradeId);
+                _closingInProgress.TryRemove(position.TradeId, out _);
             }
             else
             {
@@ -251,7 +238,7 @@ public class MifxPositionSyncService
             _logger.LogError(ex,
                 "Close failed for {Id} ({Pair} {Dir}): {Err}",
                 position.TradeId, position.Pair, position.Direction, ex.Message);
-            lock (_closingInProgress) _closingInProgress.Remove(position.TradeId);
+            _closingInProgress.TryRemove(position.TradeId, out _);
         }
     }
 }

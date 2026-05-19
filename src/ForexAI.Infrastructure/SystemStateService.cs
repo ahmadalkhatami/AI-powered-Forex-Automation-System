@@ -70,13 +70,20 @@ public class SystemStateService : ISystemStateService
 
     private void OnModeChanged(object? sender, ModeChangedEventArgs e)
     {
-        // Reset state ke default + reload dari file mode baru.
-        // Cooldown post-loss tidak boleh terbawa antar mode (demo loss ≠ block real trade).
+        // Reset SEMUA state ke default sebelum reload — supaya settings demo tidak
+        // bocor ke real mode (atau sebaliknya) kalau file mode baru belum ada / corrupt.
+        // Cooldown post-loss juga di-reset karena loss demo ≠ block real trade.
         lock (_lock)
         {
             IsHalted = false; HaltReason = null; HaltedAt = null;
             LastLossDirection = null; LastLossAt = null;
-            MaxSpreadPips = 2.5m; MaxConsecutiveLosses = 3; MaxHoldingMinutes = 0; CooldownMinutes = 30;
+            MaxSpreadPips = 2.5m;
+            MaxConsecutiveLosses = 3;
+            MaxHoldingMinutes = 0;
+            CooldownMinutes = 30;
+            NanoMaxDailyLossUsd = 5m;
+            NanoEquityFloorUsd  = 20m;
+            MaxWeeklyDrawdownPct = 0.05m;
             MaxTradesPerDay = 7;
             AutoApproveMinConfidence = 0.70m;
         }
@@ -158,13 +165,15 @@ public class SystemStateService : ISystemStateService
         return true;
     }
 
+    // Snapshot defaults harus match runtime defaults. MaxHoldingMinutes=0 (disabled per user
+    // choice 2026-05-19); kalau load file lama tanpa field ini, jangan force ke 360.
     private record Snapshot(
         bool IsHalted,
         string? HaltReason,
         DateTimeOffset? HaltedAt,
         decimal MaxSpreadPips,
         int MaxConsecutiveLosses,
-        int MaxHoldingMinutes = 360,
+        int MaxHoldingMinutes = 0,
         SignalDirection? LastLossDirection = null,
         DateTimeOffset? LastLossAt = null,
         int CooldownMinutes = 30,

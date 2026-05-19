@@ -14,8 +14,8 @@ namespace ForexAI.Infrastructure.Services;
 /// </summary>
 public class RuleBasedRiskEvaluator : IRiskEvaluator
 {
-    private const decimal MinConfidence  = 0.0m;   // TEST: buka semua confidence
-    private const decimal HighConfidence = 0.60m;  // TEST: caution mulai 60%
+    private const decimal MinConfidence  = 0.60m;  // hard floor — di bawah ini = NO-GO
+    private const decimal HighConfidence = 0.75m;  // di atas ini = clean GO; antara MinConfidence-HighConfidence = GO_WITH_CAUTION
     private const int     MaxOpenPositions = 3;
 
     private readonly IModeService _mode;
@@ -36,10 +36,9 @@ public class RuleBasedRiskEvaluator : IRiskEvaluator
         var noGoReasons  = new List<string>();
         var cautionNotes = new List<string>();
 
-        // ── Hard gates: confidence, max positions ──────────────────────────
-        // TEST: HOLD di-skip agar bisa approve manual untuk testing
-        // if (signal.Signal == SignalDirection.HOLD)
-        //     noGoReasons.Add("Signal is HOLD — no actionable direction");
+        // ── Hard gates: confidence, max positions, HOLD direction ──────────
+        if (signal.Signal == SignalDirection.HOLD)
+            noGoReasons.Add("Signal is HOLD — no actionable direction");
 
         if (predictor.AdjustedConfidence < MinConfidence)
             noGoReasons.Add(

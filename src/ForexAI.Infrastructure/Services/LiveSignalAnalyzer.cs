@@ -39,6 +39,14 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         string Rationale);
 
     /// <summary>
+    /// Drop the forming (in-flight) bar from EA payload supaya detector/analyzer pakai
+    /// last CLOSED bar. EA kirim CopyRates(start=0, count) → index N-1 = current forming bar.
+    /// Tanpa drop, pattern/breakout/sweep bisa false-detect karena bar masih bergerak.
+    /// </summary>
+    private static IReadOnlyList<CandleBar> ClosedBars(IReadOnlyList<CandleBar> bars)
+        => bars.Count <= 1 ? bars : bars.Take(bars.Count - 1).ToList();
+
+    /// <summary>
     /// Deteksi breakout multi-confirmation: close candle terakhir di luar high/low N bar
     /// sebelumnya + check fakeout filter + compression + 3-factor confirmation.
     /// Default lookback=20 (4 jam M15, 20 jam H1, 20 hari D1).
@@ -46,7 +54,9 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
     private BreakoutInfo DetectBreakout(string pair, string timeframe, decimal rsi14, int lookback = 20)
     {
         var none = new BreakoutInfo(BreakoutDirection.None, 0m, 0m, 0, false, false, "");
-        var bars = _candleFeed.Get(pair, timeframe, lookback + 1);
+        // +2: butuh 1 extra untuk drop forming bar, plus lookback+1 untuk akses current+prev N.
+        var rawBars = _candleFeed.Get(pair, timeframe, lookback + 2);
+        var bars = ClosedBars(rawBars);
         if (bars.Count < lookback + 1) return none;
 
         var current = bars[^1];
@@ -153,8 +163,10 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         // ── 3. Structure ────────────────────────────────────────────────────
         var (structure, pctFromSupport) = AnalyzeStructure(snap);
 
-        // ── 3b. Candlestick pattern detection ──────────────────────────────
-        var patternCandles = _candleFeed.Get(snap.Pair, snap.Timeframe, 3);
+        // ── 3b. Candlestick pattern detection — pakai 3 LAST CLOSED bar, bukan forming.
+        // EA kirim CopyRates(start=0) sehingga bar terakhir masih in-progress → pattern bisa flip.
+        var patternCandlesRaw = _candleFeed.Get(snap.Pair, snap.Timeframe, 4);
+        var patternCandles = ClosedBars(patternCandlesRaw);
         var pattern = CandlestickPatternDetector.Detect(patternCandles);
         if (pattern.Name != "None")
         {
@@ -182,21 +194,31 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         // ── 4f. Liquidity sweep detection — promote HOLD ke BUY/SELL kalau ada sweep
         //       (smart money just grabbed retail stops, high-probability reversal).
         //       Higher priority than breakout (reversal signal stronger).
-        var sweepCandles = _candleFeed.Get(snap.Pair, snap.Timeframe, 22);
+        //       Pakai last CLOSED bar (drop forming) — sweep di in-flight candle bisa false.
+        var sweepCandlesRaw = _candleFeed.Get(snap.Pair, snap.Timeframe, 23);
+        var sweepCandles = ClosedBars(sweepCandlesRaw);
         var liquiditySweep = LiquidityDetector.DetectSweep(sweepCandles);
         if (liquiditySweep.Detected && signal == SignalDirection.HOLD)
         {
-            if (liquiditySweep.Direction == "Bullish" &&
-                !_systemState.IsInCooldown(SignalDirection.BUY, out _))
+            SignalDirection promoteTo = liquiditySweep.Direction switch
             {
-                vetoReasons.Add($"LIQUIDITY SWEEP: HOLD → BUY — {liquiditySweep.Description}");
-                signal = SignalDirection.BUY;
-            }
-            else if (liquiditySweep.Direction == "Bearish" &&
-                     !_systemState.IsInCooldown(SignalDirection.SELL, out _))
+                "Bullish" => SignalDirection.BUY,
+                "Bearish" => SignalDirection.SELL,
+                _         => SignalDirection.HOLD
+            };
+            if (promoteTo != SignalDirection.HOLD && !_systemState.IsInCooldown(promoteTo, out _))
             {
-                vetoReasons.Add($"LIQUIDITY SWEEP: HOLD → SELL — {liquiditySweep.Description}");
-                signal = SignalDirection.SELL;
+                // Re-apply hard vetos — promote tidak boleh bypass reversal/overextension check.
+                var (recheck, recheckReasons) = ApplyHardVetos(promoteTo, snap, momentum, pctFromSupport);
+                if (recheck == SignalDirection.HOLD)
+                {
+                    vetoReasons.Add($"LIQUIDITY SWEEP DENIED: {promoteTo} promote blocked by hard veto — {string.Join(" | ", recheckReasons)}");
+                }
+                else
+                {
+                    vetoReasons.Add($"LIQUIDITY SWEEP: HOLD → {promoteTo} — {liquiditySweep.Description}");
+                    signal = promoteTo;
+                }
             }
         }
 
@@ -227,20 +249,33 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             }
             else if (signal == SignalDirection.HOLD && qualityBreakout)
             {
-                // Promote hanya kalau breakout berkualitas + aligned dengan D1 (atau D1 tidak ada)
-                if (breakout.Direction == BreakoutDirection.Bullish && !d1Bearish &&
-                    !_systemState.IsInCooldown(SignalDirection.BUY, out _))
+                SignalDirection? promoteTo = null;
+                bool d1AlignTag = false;
+                if (breakout.Direction == BreakoutDirection.Bullish && !d1Bearish)
                 {
-                    vetoReasons.Add($"BREAKOUT BUY: HOLD di-promote — {breakout.Rationale}" +
-                                    (d1Bullish ? ", D1 bullish align." : ""));
-                    signal = SignalDirection.BUY;
+                    promoteTo = SignalDirection.BUY;
+                    d1AlignTag = d1Bullish;
                 }
-                else if (breakout.Direction == BreakoutDirection.Bearish && !d1Bullish &&
-                         !_systemState.IsInCooldown(SignalDirection.SELL, out _))
+                else if (breakout.Direction == BreakoutDirection.Bearish && !d1Bullish)
                 {
-                    vetoReasons.Add($"BREAKOUT SELL: HOLD di-promote — {breakout.Rationale}" +
-                                    (d1Bearish ? ", D1 bearish align." : ""));
-                    signal = SignalDirection.SELL;
+                    promoteTo = SignalDirection.SELL;
+                    d1AlignTag = d1Bearish;
+                }
+
+                if (promoteTo.HasValue && !_systemState.IsInCooldown(promoteTo.Value, out _))
+                {
+                    // Re-apply hard vetos — breakout promote tidak boleh bypass reversal check.
+                    var (recheck, recheckReasons) = ApplyHardVetos(promoteTo.Value, snap, momentum, pctFromSupport);
+                    if (recheck == SignalDirection.HOLD)
+                    {
+                        vetoReasons.Add($"BREAKOUT DENIED: {promoteTo} promote blocked by hard veto — {string.Join(" | ", recheckReasons)}");
+                    }
+                    else
+                    {
+                        string alignSuffix = d1AlignTag ? (promoteTo == SignalDirection.BUY ? ", D1 bullish align." : ", D1 bearish align.") : "";
+                        vetoReasons.Add($"BREAKOUT {promoteTo}: HOLD di-promote — {breakout.Rationale}{alignSuffix}");
+                        signal = promoteTo.Value;
+                    }
                 }
             }
         }
@@ -275,6 +310,37 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
 
             confidenceScore = Math.Min(confidenceScore + boost, 0.95m);
             confluenceScore = Math.Min(confluenceScore + (int)Math.Round(boost * 100m), 100);
+        }
+
+        // ── 5b-bis. Candlestick pattern boost/penalty — scale by pattern reliability ─
+        //       Pattern aligned dengan signal (e.g. Bullish Pin Bar + BUY signal):
+        //          boost = reliability × 0.10 (max +0.085 untuk Morning Star)
+        //       Pattern counter signal (e.g. Bearish Engulfing + BUY signal):
+        //          penalty = reliability × 0.10 (likely trap, lower confidence)
+        //       Neutral pattern (Doji, Inside Bar): no change — consolidation, no edge.
+        if (signal != SignalDirection.HOLD && pattern.Reliability >= 0.50m)
+        {
+            bool patternAligned =
+                (pattern.Bias == "Bullish" && signal == SignalDirection.BUY) ||
+                (pattern.Bias == "Bearish" && signal == SignalDirection.SELL);
+            bool patternCounter =
+                (pattern.Bias == "Bullish" && signal == SignalDirection.SELL) ||
+                (pattern.Bias == "Bearish" && signal == SignalDirection.BUY);
+
+            if (patternAligned)
+            {
+                decimal boost = pattern.Reliability * 0.10m;
+                confidenceScore = Math.Min(confidenceScore + boost, 0.95m);
+                confluenceScore = Math.Min(confluenceScore + (int)Math.Round(boost * 100m), 100);
+                vetoReasons.Add($"PATTERN ALIGNED: {pattern.Name} ({pattern.Reliability:F2} reliability) supports {signal} — conf +{boost * 100m:F0}%.");
+            }
+            else if (patternCounter)
+            {
+                decimal penalty = pattern.Reliability * 0.10m;
+                confidenceScore = Math.Max(confidenceScore - penalty, 0.35m);
+                confluenceScore = Math.Max(confluenceScore - (int)Math.Round(penalty * 100m), 0);
+                vetoReasons.Add($"PATTERN COUNTER: {pattern.Name} ({pattern.Reliability:F2} reliability) lawan {signal} — possible trap, conf -{penalty * 100m:F0}%.");
+            }
         }
 
         // ── 5c. Premium/Discount Zone bias (ICT/SMC) ─────────────────────────
@@ -575,16 +641,29 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
     // 1. Momentum-direction (counter-trend): block bila RSI direction lawan signal
     // 2. Mid-range: tidak ada edge S/R → reject
     // 3. Structure mismatch: SELL near support / BUY near resistance
-    // 4. RSI extreme: SELL pada RSI ≤ 45 / BUY pada RSI ≥ 55 (tightened dari 35/65)
+    // 4. RSI extreme: SELL pada RSI ≤ 30 / BUY pada RSI ≥ 70 (oversold/overbought sejati)
     // 5. Overextension: distance dari MA20 > 2 × ATR
     private static (SignalDirection result, List<string> reasons) ApplySetupVetos(
+        SignalDirection signal, MarketSnapshot snap, MomentumAnalysis momentum, decimal pctFromSupport)
+    {
+        var (hardResult, hardReasons) = ApplyHardVetos(signal, snap, momentum, pctFromSupport);
+        var htfReasons = BuildHtfModifierWarnings(hardResult, snap);
+        hardReasons.AddRange(htfReasons);
+        return (hardResult, hardReasons);
+    }
+
+    /// <summary>
+    /// Hard vetos (5 rules) — block sinyal pada reversal/overextension.
+    /// Dipisah dari HTF modifier supaya bisa di-re-apply setelah sweep/breakout promote
+    /// (HTF modifier hanya log warning, tidak re-trigger).
+    /// </summary>
+    private static (SignalDirection result, List<string> reasons) ApplyHardVetos(
         SignalDirection signal, MarketSnapshot snap, MomentumAnalysis momentum, decimal pctFromSupport)
     {
         var reasons = new List<string>();
         if (signal == SignalDirection.HOLD) return (signal, reasons);
 
         // VETO 1 — Counter-trend momentum (RSI direction melawan signal)
-        // Live data: 68% SELL signal terjadi saat RSI rising → momentum melawan = catching falling knife.
         bool rsiRising  = momentum.RSIDirection.Equals("rising",  StringComparison.OrdinalIgnoreCase);
         bool rsiFalling = momentum.RSIDirection.Equals("falling", StringComparison.OrdinalIgnoreCase);
         if (signal == SignalDirection.SELL && rsiRising)
@@ -599,8 +678,6 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         }
 
         // VETO 2 — Mid-range sejati (true 50/50 zone): tidak ada edge S/R sama sekali.
-        // Tightened ke 0.45-0.55 (dari 0.35-0.65) — voting system sudah handle setup lemah
-        // dengan structure score 0.40; veto ini cuma block kasus benar-benar mid (zero edge).
         if (pctFromSupport > 0.45m && pctFromSupport < 0.55m)
         {
             reasons.Add($"VETO: {signal} di-override ke HOLD — price {pctFromSupport:P0} dari range = true mid-range, tidak ada edge S/R.");
@@ -608,8 +685,6 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         }
 
         // VETO 3 — Structure mismatch: SELL near support / BUY near resistance
-        // Price < 25% dari S→R range = sangat dekat support (bounce risk untuk SELL)
-        // Price > 75% dari S→R range = sangat dekat resistance (rejection risk untuk BUY)
         if (signal == SignalDirection.SELL && pctFromSupport <= 0.25m)
         {
             reasons.Add($"VETO: SELL di-override ke HOLD — price {pctFromSupport:P0} dari range terlalu dekat SUPPORT, risiko bounce.");
@@ -621,10 +696,7 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             return (SignalDirection.HOLD, reasons);
         }
 
-        // VETO 4 — RSI extreme zone (true overbought/oversold: 30/70 standar industri)
-        // Sebelumnya threshold 45/55 terlalu ketat — RSI 55-65 itu zona bullish biasa, bukan extreme.
-        // V1 (counter-trend RSI direction) sudah catch kasus "menjual saat RSI naik dari 36" —
-        // V4 ini cuma safety net untuk extreme sejati (≥70 atau ≤30).
+        // VETO 4 — RSI extreme zone (≥70 atau ≤30)
         if (signal == SignalDirection.SELL && momentum.RSIValue <= 30m)
         {
             reasons.Add($"VETO: SELL di-override ke HOLD — RSI {momentum.RSIValue:F1} ≤ 30 (oversold sejati), risiko reversal.");
@@ -637,7 +709,6 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         }
 
         // VETO 5 — Overextension dari MA20 M15 (>2 × ATR)
-        // Mencegah entry di tail-end momentum, mean-reversion lebih mungkin terjadi.
         if (snap.ATR14 > 0m)
         {
             decimal distFromMa20 = Math.Abs(snap.CurrentPrice - snap.MA20_M15);
@@ -651,28 +722,26 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             }
         }
 
-        // HTF D1 modifier — bukan hard veto lagi (audit feedback: M15 scalp pullback
-        // valid di counter-D1 trend, harusnya require higher confidence, not block).
-        //
-        // Behavior baru:
-        // - D1 align dengan signal direction: pass-through (best case)
-        // - D1 counter signal: tetap pass, tapi tag warning. Confidence threshold higher
-        //   di-enforce di Nano vetos / auto-approve gate. Pattern/breakout still bisa
-        //   promote/boost counter-D1 setup kalau setup quality cukup tinggi.
-        if (snap.MA20_D1 > 0m && snap.MA50_D1 > 0m)
-        {
-            bool d1Bullish = snap.MA20_D1 > snap.MA50_D1;
-            if (signal == SignalDirection.SELL && d1Bullish)
-            {
-                reasons.Add($"HTF MODIFIER: D1 BULLISH (MA20 {snap.MA20_D1:F5} > MA50 {snap.MA50_D1:F5}), SELL counter-D1 — butuh confidence ≥75% untuk auto-approve.");
-            }
-            else if (signal == SignalDirection.BUY && !d1Bullish)
-            {
-                reasons.Add($"HTF MODIFIER: D1 BEARISH (MA20 {snap.MA20_D1:F5} < MA50 {snap.MA50_D1:F5}), BUY counter-D1 — butuh confidence ≥75% untuk auto-approve.");
-            }
-        }
-
         return (signal, reasons);
+    }
+
+    /// <summary>
+    /// HTF D1 modifier — bukan hard veto. Tag warning supaya auto-approve gate boleh
+    /// enforce confidence yang lebih tinggi (counter-D1 setup butuh +5%).
+    /// </summary>
+    private static List<string> BuildHtfModifierWarnings(SignalDirection signal, MarketSnapshot snap)
+    {
+        var reasons = new List<string>();
+        if (signal == SignalDirection.HOLD) return reasons;
+        if (snap.MA20_D1 <= 0m || snap.MA50_D1 <= 0m) return reasons;
+
+        bool d1Bullish = snap.MA20_D1 > snap.MA50_D1;
+        if (signal == SignalDirection.SELL && d1Bullish)
+            reasons.Add($"HTF MODIFIER: D1 BULLISH (MA20 {snap.MA20_D1:F5} > MA50 {snap.MA50_D1:F5}), SELL counter-D1 — auto-approve butuh threshold+5%.");
+        else if (signal == SignalDirection.BUY && !d1Bullish)
+            reasons.Add($"HTF MODIFIER: D1 BEARISH (MA20 {snap.MA20_D1:F5} < MA50 {snap.MA50_D1:F5}), BUY counter-D1 — auto-approve butuh threshold+5%.");
+
+        return reasons;
     }
 
     // ── Confluence & Confidence Scores ────────────────────────────────────────

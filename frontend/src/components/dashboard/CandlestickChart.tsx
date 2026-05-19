@@ -29,6 +29,7 @@ import { ChartToolbar, type ToolMode } from './ChartToolbar'
 import { ChartDrawingOverlay } from './ChartDrawingOverlay'
 import { PositionBoxOverlay, type PositionBox } from './PositionBoxOverlay'
 import { PatternHighlightOverlay } from './PatternHighlightOverlay'
+import { SupportResistanceOverlay } from './SupportResistanceOverlay'
 import type { TimeframePattern } from '@/lib/types'
 
 interface TradeOverlay {
@@ -533,24 +534,26 @@ export function CandlestickChart({
     // bukan priceLine biasa lagi.
 
     if (structure) {
+      // Support — solid green line + axis label badge supaya kelihatan jelas
       added.push(
         candleSeriesRef.current.createPriceLine({
           price: structure.nearestSupport,
-          color: 'rgba(34,197,94,0.5)',
-          lineStyle: LineStyle.Dotted,
-          lineWidth: 1,
-          axisLabelVisible: false,  // hide right-side label — kurangi clutter
-          title: 'Support',
+          color: 'rgba(34,197,94,0.85)',
+          lineStyle: LineStyle.Solid,
+          lineWidth: 2,
+          axisLabelVisible: true,
+          title: '⬆ S',
         }),
       )
+      // Resistance — solid red line + axis label badge
       added.push(
         candleSeriesRef.current.createPriceLine({
           price: structure.nearestResistance,
-          color: 'rgba(239,68,68,0.5)',
-          lineStyle: LineStyle.Dotted,
-          lineWidth: 1,
-          axisLabelVisible: false,  // hide right-side label
-          title: 'Resistance',
+          color: 'rgba(239,68,68,0.85)',
+          lineStyle: LineStyle.Solid,
+          lineWidth: 2,
+          axisLabelVisible: true,
+          title: '⬇ R',
         }),
       )
     }
@@ -735,6 +738,14 @@ export function CandlestickChart({
         style={isCollapsed ? { display: 'none' } : undefined}
       >
         <div ref={mainContainerRef} className="w-full relative" style={{ minHeight: 480 }}>
+          <SupportResistanceOverlay
+            chart={mainChartRef.current}
+            series={candleSeriesRef.current}
+            support={structure?.nearestSupport ?? null}
+            resistance={structure?.nearestResistance ?? null}
+            width={chartSize.width}
+            height={chartSize.height}
+          />
           <PatternHighlightOverlay
             chart={mainChartRef.current}
             series={candleSeriesRef.current}

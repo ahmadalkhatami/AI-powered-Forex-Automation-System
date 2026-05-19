@@ -136,6 +136,7 @@ Status legend:
 | Live PnL interpolation | ✅ Live | Bid/Ask based (not mid), 30s stale guard |
 | Position box overlay (TradingView-style) | ✅ Live | [PositionBoxOverlay.tsx](../frontend/src/components/dashboard/PositionBoxOverlay.tsx) |
 | Pattern highlight overlay | ✅ Live | [PatternHighlightOverlay.tsx](../frontend/src/components/dashboard/PatternHighlightOverlay.tsx) — dashed rect + label pill + connector |
+| **S/R zone overlay** | ✅ Live | [SupportResistanceOverlay.tsx](../frontend/src/components/dashboard/SupportResistanceOverlay.tsx) — semi-transparent zone band (±5p) + dashed edges. Plus prominent priceLine (solid 2px) dengan axis label badge "⬆ S" / "⬇ R". Auto-update dari `structure.nearestSupport/Resistance`. |
 | Drawing tools (9 jenis) | ✅ Live | hline, trendline, ray, rectangle, text, measure, fib retrace, fib ext, snap |
 | Drawing lock + color/thickness | ✅ Live | Per-pair+TF persisted ke localStorage |
 | Session chip (NY/London/etc) | ✅ Live | [SessionChip.tsx](../frontend/src/components/dashboard/SessionChip.tsx) auto-update |

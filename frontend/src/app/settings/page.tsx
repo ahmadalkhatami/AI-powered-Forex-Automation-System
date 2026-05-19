@@ -107,6 +107,26 @@ export default function SettingsPage() {
         </div>
       )}
 
+      {/* Adaptive Learning master toggle — display only di P1, control aktif di P2 */}
+      <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-2 opacity-60">
+        <div className="flex items-baseline justify-between">
+          <div className="space-y-1">
+            <h2 className="text-sm font-semibold">Adaptive Learning Engine</h2>
+            <p className="text-xs text-muted-foreground">
+              Auto-tune session/regime/pattern thresholds berdasarkan rolling stats.
+              <br />
+              <span className="text-amber-500">Phase 1 (observe only) — toggle aktif di Phase 2.</span> Lihat <a href="/adaptive" className="underline">/adaptive</a> untuk live stats.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground font-mono">DISABLED</span>
+            <div className="relative inline-block w-10 h-5 rounded-full bg-muted cursor-not-allowed">
+              <span className="absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-background"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="space-y-4">
         {FIELDS.map((f) => {
           const currentValue = draft[f.key] as number

@@ -278,6 +278,39 @@ export interface SettingsUpdateRequest {
   autoApproveMinConfidence?: number
 }
 
+// ── Adaptive Learning Stats (Phase 1 observe) ────────────────────────────
+export interface BucketStat {
+  label: string
+  trades: number
+  wins: number
+  winRate: number               // 0..1
+  wilsonLower95: number         // lower 95% Wilson interval
+  wilsonUpper95: number
+  avgPnlUsd: number
+  totalPnlUsd: number
+  expectancyR: number           // R-multiple = avgPnl / avgRisk
+  avgMfePips: number
+  avgMaePips: number
+  bucketReady: boolean          // trades >= 20
+}
+
+export interface AdaptiveStatsResponse {
+  totalTradeCount: number
+  windowTradeCount: number
+  windowSize: number
+  globalGateOpen: boolean       // totalTradeCount >= 50
+  overallWinRate: number
+  overallExpectancyR: number
+  overallExpectancyUsd: number
+  byRegime: BucketStat[]
+  bySession: BucketStat[]
+  byPattern: BucketStat[]
+  byZone: BucketStat[]
+  byConfidenceBand: BucketStat[]
+  bySweepFlag: BucketStat[]
+  byExitReason: BucketStat[]
+}
+
 export interface SignalHeroData {
   id: string
   pair: string

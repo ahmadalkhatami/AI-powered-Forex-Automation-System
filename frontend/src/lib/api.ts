@@ -16,6 +16,7 @@ import type {
   PatternResponse,
   SettingsResponse,
   SettingsUpdateRequest,
+  AdaptiveStatsResponse,
 } from '@/lib/types'
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -175,4 +176,9 @@ export async function updateSettings(req: SettingsUpdateRequest): Promise<Settin
     method: 'POST',
     body: JSON.stringify(req),
   })
+}
+
+// ── Adaptive learning stats (Phase 1 observe) ──────────────────────────
+export async function fetchAdaptiveStats(window = 30): Promise<AdaptiveStatsResponse> {
+  return fetchApi(`/api/adaptive/stats?window=${window}`)
 }

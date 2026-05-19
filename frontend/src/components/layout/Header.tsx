@@ -48,6 +48,12 @@ export function Header() {
           Backtest
         </Link>
         <Link
+          href="/adaptive"
+          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+        >
+          Adaptive
+        </Link>
+        <Link
           href="/settings"
           className="text-sm text-muted-foreground hover:text-foreground transition-colors"
         >

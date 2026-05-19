@@ -311,6 +311,32 @@ export interface AdaptiveStatsResponse {
   byExitReason: BucketStat[]
 }
 
+// ── Dynamic Structure (swing pivots + auto-drawn trendlines) ─────────────
+export interface SwingPointDto {
+  type: 'High' | 'Low'
+  price: number
+  time: number  // Unix seconds
+}
+
+export interface TrendlineDto {
+  startTime: number
+  startPrice: number
+  endTime: number
+  endPrice: number
+  direction: 'Ascending' | 'Descending' | 'Flat'
+  strength: 'Strong' | 'Good' | 'Weak'
+  slopePipsPerHour: number
+}
+
+export interface DynamicStructureResponse {
+  pair: string
+  timeframe: string
+  swingHighs: SwingPointDto[]
+  swingLows: SwingPointDto[]
+  dynamicResistance: TrendlineDto | null
+  dynamicSupport: TrendlineDto | null
+}
+
 export interface SignalHeroData {
   id: string
   pair: string

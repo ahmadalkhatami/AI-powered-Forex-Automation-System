@@ -29,6 +29,7 @@ import {
   haltSystem,
   resumeSystem,
   fetchPatterns,
+  fetchDynamicStructure,
   getSettings,
 } from '@/lib/api'
 import type {
@@ -47,6 +48,7 @@ import type {
   ChartTimeframe,
   MifxStatusResponse,
   PatternResponse,
+  DynamicStructureResponse,
   TimeframePattern,
 } from '@/lib/types'
 
@@ -185,6 +187,7 @@ export default function DashboardPage() {
   const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('M15')
   const [chartWideMode, setChartWideMode] = useState(false)
   const [patterns, setPatterns] = useState<PatternResponse | null>(null)
+  const [dynamicStructure, setDynamicStructure] = useState<DynamicStructureResponse | null>(null)
   // Auto-approve confidence threshold dari settings (default 0.70 sampai loaded)
   const [autoApproveMinConfidence, setAutoApproveMinConfidence] = useState(0.70)
   const [mifxStatus, setMifxStatus] = useState<MifxStatusResponse | null>(null)
@@ -328,6 +331,20 @@ export default function DashboardPage() {
     const id = setInterval(fetchOnce, 30_000)
     return () => { alive = false; clearInterval(id) }
   }, [])
+
+  // Dynamic Structure (swing pivots + trendlines) — poll 30s per active timeframe
+  useEffect(() => {
+    let alive = true
+    const fetchOnce = async () => {
+      try {
+        const s = await fetchDynamicStructure('EURUSD', chartTimeframe)
+        if (alive) setDynamicStructure(s)
+      } catch { /* silent */ }
+    }
+    fetchOnce()
+    const id = setInterval(fetchOnce, 30_000)
+    return () => { alive = false; clearInterval(id) }
+  }, [chartTimeframe])
 
   // Load auto-approve threshold dari settings (re-fetch tiap 60s in case user ubah di /settings)
   useEffect(() => {
@@ -939,6 +956,7 @@ export default function DashboardPage() {
           structure={structureOverlay}
           positions={positions}
           pattern={activePattern}
+          dynamicStructure={dynamicStructure}
           onTimeframeChange={setChartTimeframe}
           isMifxConnected={mifxStatus?.connected ?? false}
           isWideMode={chartWideMode}

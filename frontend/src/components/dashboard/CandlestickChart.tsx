@@ -30,6 +30,7 @@ import { ChartDrawingOverlay } from './ChartDrawingOverlay'
 import { PositionBoxOverlay, type PositionBox } from './PositionBoxOverlay'
 import { PatternHighlightOverlay } from './PatternHighlightOverlay'
 import { SupportResistanceOverlay } from './SupportResistanceOverlay'
+import { DynamicSROverlay, type SwingPoint, type Trendline } from './DynamicSROverlay'
 import type { TimeframePattern } from '@/lib/types'
 
 interface TradeOverlay {
@@ -67,6 +68,12 @@ interface Props {
   structure?: StructureOverlay | null
   positions?: TradePositionResponse[]
   pattern?: TimeframePattern | null
+  dynamicStructure?: {
+    swingHighs: SwingPoint[]
+    swingLows: SwingPoint[]
+    dynamicResistance: Trendline | null
+    dynamicSupport: Trendline | null
+  } | null
   onTimeframeChange?: (tf: ChartTimeframe) => void
   isMifxConnected?: boolean
   isWideMode?: boolean
@@ -103,6 +110,7 @@ export function CandlestickChart({
   structure,
   positions = [],
   pattern,
+  dynamicStructure,
   onTimeframeChange,
   isMifxConnected,
   isWideMode = false,
@@ -743,6 +751,16 @@ export function CandlestickChart({
             series={candleSeriesRef.current}
             support={structure?.nearestSupport ?? null}
             resistance={structure?.nearestResistance ?? null}
+            width={chartSize.width}
+            height={chartSize.height}
+          />
+          <DynamicSROverlay
+            chart={mainChartRef.current}
+            series={candleSeriesRef.current}
+            swingHighs={dynamicStructure?.swingHighs ?? []}
+            swingLows={dynamicStructure?.swingLows ?? []}
+            dynamicResistance={dynamicStructure?.dynamicResistance ?? null}
+            dynamicSupport={dynamicStructure?.dynamicSupport ?? null}
             width={chartSize.width}
             height={chartSize.height}
           />

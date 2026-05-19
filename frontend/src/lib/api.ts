@@ -17,6 +17,7 @@ import type {
   SettingsResponse,
   SettingsUpdateRequest,
   AdaptiveStatsResponse,
+  DynamicStructureResponse,
 } from '@/lib/types'
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -181,4 +182,12 @@ export async function updateSettings(req: SettingsUpdateRequest): Promise<Settin
 // ── Adaptive learning stats (Phase 1 observe) ──────────────────────────
 export async function fetchAdaptiveStats(window = 30): Promise<AdaptiveStatsResponse> {
   return fetchApi(`/api/adaptive/stats?window=${window}`)
+}
+
+// ── Dynamic Structure (swing pivots + trendlines) ──────────────────────
+export async function fetchDynamicStructure(
+  pair: string = 'EURUSD',
+  timeframe: string = 'M15',
+): Promise<DynamicStructureResponse> {
+  return fetchApi(`/api/structure/dynamic?pair=${encodeURIComponent(pair)}&timeframe=${timeframe}`)
 }

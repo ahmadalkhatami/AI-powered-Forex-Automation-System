@@ -31,7 +31,8 @@ Status legend:
 | RSI extreme veto | ✅ Live | Skip BUY kalau RSI ≥ 70, SELL ≤ 30 |
 | Overextension veto | ✅ Live | Skip kalau price > 2×ATR dari MA20 |
 | Regime filter | ✅ Live | Force HOLD saat Ranging |
-| Nano mode strict vetos | ✅ Live | Confluence ≥ 80, conf ≥ 75%, HTF full align, ATR < 25p |
+| **Premium/Discount Zone (ICT/SMC)** | ✅ Live | Aligned-zone (BUY discount / SELL premium) → conf +5%. Counter-zone (BUY premium / SELL discount) → conf -10%. Equilibrium 35-65% range = neutral. Nano tier: counter-zone hard veto. |
+| Nano mode strict vetos | ✅ Live | Confluence ≥ 80, conf ≥ 75%, HTF full align, ATR < 25p, **counter-zone veto** |
 
 ---
 

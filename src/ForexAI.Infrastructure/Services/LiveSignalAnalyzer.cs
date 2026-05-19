@@ -277,6 +277,51 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             confluenceScore = Math.Min(confluenceScore + (int)Math.Round(boost * 100m), 100);
         }
 
+        // ── 5c. Premium/Discount Zone bias (ICT/SMC) ─────────────────────────
+        // Zone berdasarkan posisi price di range Support-Resistance:
+        //   pctFromSupport > 0.65 = PREMIUM (price mahal, ideal SELL)
+        //   pctFromSupport < 0.35 = DISCOUNT (price murah, ideal BUY)
+        //   0.35-0.65 = EQUILIBRIUM (no man's land)
+        //
+        // Counter-zone (BUY di premium / SELL di discount) = setup melawan zona
+        //   = lower edge, kena confidence penalty.
+        // Aligned-zone (BUY di discount / SELL di premium) = setup ideal SMC
+        //   = confidence bonus.
+        if (signal != SignalDirection.HOLD)
+        {
+            string zone = pctFromSupport > 0.65m ? "Premium" :
+                          pctFromSupport < 0.35m ? "Discount" : "Equilibrium";
+
+            bool buyInDiscount  = signal == SignalDirection.BUY  && zone == "Discount";
+            bool sellInPremium  = signal == SignalDirection.SELL && zone == "Premium";
+            bool buyInPremium   = signal == SignalDirection.BUY  && zone == "Premium";
+            bool sellInDiscount = signal == SignalDirection.SELL && zone == "Discount";
+
+            if (buyInDiscount || sellInPremium)
+            {
+                confidenceScore = Math.Min(confidenceScore + 0.05m, 0.95m);
+                confluenceScore = Math.Min(confluenceScore + 5, 100);
+                vetoReasons.Add($"ZONE ALIGNED: {signal} di {zone} zone ({pctFromSupport:P0} range) — ideal SMC setup, conf +5%.");
+            }
+            else if (buyInPremium || sellInDiscount)
+            {
+                confidenceScore = Math.Max(confidenceScore - 0.10m, 0.35m);
+                confluenceScore = Math.Max(confluenceScore - 10, 0);
+                vetoReasons.Add($"ZONE COUNTER: {signal} di {zone} zone ({pctFromSupport:P0} range) — lawan SMC zona, conf -10%.");
+            }
+            else  // Equilibrium
+            {
+                vetoReasons.Add($"ZONE: {signal} di Equilibrium ({pctFromSupport:P0} range) — no man's land, neutral.");
+            }
+
+            // Nano tier strict veto: counter-zone setup hard skip (modal kecil tidak afford lower-edge trade)
+            if ((buyInPremium || sellInDiscount) && tier.Name == "nano")
+            {
+                vetoReasons.Add($"VETO Nano: {signal} counter-zone {zone} — modal kecil hanya trade aligned-zone setup.");
+                signal = SignalDirection.HOLD;
+            }
+        }
+
         // ── 4e. Nano-mode extra vetos — STRICT quality threshold untuk modal kecil ─
         // Modal real <$100 = 5% per trade unavoidable (broker min lot). Untuk kompensasi,
         // butuh setup yang JAUH lebih bagus: confluence ≥ 80, conf ≥ 0.75, HTF full align,

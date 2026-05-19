@@ -13,11 +13,31 @@ public class AdaptiveController : ControllerBase
 {
     private readonly IMediator _mediator;
     private readonly IAdaptiveStateService _adaptiveState;
+    private readonly ISystemStateService _systemState;
 
-    public AdaptiveController(IMediator mediator, IAdaptiveStateService adaptiveState)
+    public AdaptiveController(
+        IMediator mediator,
+        IAdaptiveStateService adaptiveState,
+        ISystemStateService systemState)
     {
         _mediator = mediator;
         _adaptiveState = adaptiveState;
+        _systemState = systemState;
+    }
+
+    /// <summary>
+    /// Effective thresholds — merge baseline (SystemState.AutoApproveMinConfidence) +
+    /// adaptive per-regime override. FE call ini untuk pick threshold yang tepat
+    /// based on snapshot.regime current signal.
+    /// </summary>
+    [HttpGet("effective")]
+    public ActionResult<EffectiveThresholdsResponse> Effective()
+    {
+        decimal baseline = _systemState.AutoApproveMinConfidence;
+        var overrides = _adaptiveState.Current.RegimeThresholdOverride;
+        return Ok(new EffectiveThresholdsResponse(
+            BaselineAutoApprove: baseline,
+            ByRegime: new Dictionary<string, decimal>(overrides)));
     }
 
     /// <summary>
@@ -95,3 +115,7 @@ public record AdaptiveSnapshotResponse(
 public record RollbackRequest(string RequestedBy = "user");
 public record RollbackResponse(bool Success, string Message);
 public record ToggleRequest(bool Disabled);
+
+public record EffectiveThresholdsResponse(
+    decimal BaselineAutoApprove,
+    Dictionary<string, decimal> ByRegime);

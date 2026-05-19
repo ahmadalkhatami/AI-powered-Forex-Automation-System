@@ -33,6 +33,9 @@ public static class DependencyInjection
         services.AddSingleton<AuditLogger>();
         services.AddScoped<BacktestRunner>();
 
+        // Adaptive Learning Engine — BackgroundService runs every 6h
+        services.AddHostedService<AdaptiveLearningService>();
+
         services.AddScoped<EaDeployService>();
         services.AddScoped<ITradePositionRepository, JsonTradePositionRepository>();
         services.AddScoped<ISignalRepository, JsonSignalRepository>();

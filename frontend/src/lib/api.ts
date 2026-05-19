@@ -18,6 +18,7 @@ import type {
   SettingsUpdateRequest,
   AdaptiveStatsResponse,
   DynamicStructureResponse,
+  AdaptiveEffectiveResponse,
 } from '@/lib/types'
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -190,4 +191,9 @@ export async function fetchDynamicStructure(
   timeframe: string = 'M15',
 ): Promise<DynamicStructureResponse> {
   return fetchApi(`/api/structure/dynamic?pair=${encodeURIComponent(pair)}&timeframe=${timeframe}`)
+}
+
+// ── Adaptive effective thresholds (baseline + per-regime override) ──────
+export async function fetchAdaptiveEffective(): Promise<AdaptiveEffectiveResponse> {
+  return fetchApi('/api/adaptive/effective')
 }

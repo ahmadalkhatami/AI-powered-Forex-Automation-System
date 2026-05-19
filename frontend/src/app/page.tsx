@@ -30,6 +30,7 @@ import {
   resumeSystem,
   fetchPatterns,
   fetchDynamicStructure,
+  fetchAdaptiveEffective,
   getSettings,
 } from '@/lib/api'
 import type {
@@ -188,6 +189,8 @@ export default function DashboardPage() {
   const [chartWideMode, setChartWideMode] = useState(false)
   const [patterns, setPatterns] = useState<PatternResponse | null>(null)
   const [dynamicStructure, setDynamicStructure] = useState<DynamicStructureResponse | null>(null)
+  // Per-regime adaptive threshold overrides — populated saat Adaptive Engine fire Action 1
+  const [adaptiveRegimeOverrides, setAdaptiveRegimeOverrides] = useState<Record<string, number>>({})
   // Auto-approve confidence threshold dari settings (default 0.70 sampai loaded)
   const [autoApproveMinConfidence, setAutoApproveMinConfidence] = useState(0.70)
   const [mifxStatus, setMifxStatus] = useState<MifxStatusResponse | null>(null)
@@ -354,6 +357,21 @@ export default function DashboardPage() {
         const s = await getSettings()
         if (alive) setAutoApproveMinConfidence(s.autoApproveMinConfidence)
       } catch { /* silent — pakai default 0.70 */ }
+    }
+    fetchOnce()
+    const id = setInterval(fetchOnce, 60_000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+
+  // Adaptive per-regime override — re-fetch tiap 60s (Adaptive Engine fire setiap 6h,
+  // 60s polling cukup untuk pickup change).
+  useEffect(() => {
+    let alive = true
+    const fetchOnce = async () => {
+      try {
+        const e = await fetchAdaptiveEffective()
+        if (alive) setAdaptiveRegimeOverrides(e.byRegime ?? {})
+      } catch { /* silent — Adaptive belum aktif */ }
     }
     fetchOnce()
     const id = setInterval(fetchOnce, 60_000)
@@ -613,7 +631,12 @@ export default function DashboardPage() {
     if (rawSignal.signal !== 'BUY' && rawSignal.signal !== 'SELL') return
     // Counter-D1 setup butuh confidence lebih tinggi (sebelumnya hard veto, sekarang modifier)
     const isCounterD1 = rawSignal.warnings?.some((w) => w.startsWith('HTF MODIFIER:')) ?? false
-    const confThreshold = autoApproveMinConfidence + (isCounterD1 ? 0.05 : 0)
+    // Per-regime adaptive override: kalau Adaptive Engine Action 1 sudah fire untuk regime ini,
+    // pakai threshold yang ter-tune. Otherwise fallback ke baseline dari Settings.
+    const regimeKey = rawSignal.snapshot?.regime ?? ''
+    const regimeOverride = adaptiveRegimeOverrides[regimeKey]
+    const effectiveBaseline = regimeOverride ?? autoApproveMinConfidence
+    const confThreshold = effectiveBaseline + (isCounterD1 ? 0.05 : 0)
     if (rawSignal.confidenceScore < confThreshold) return
     if (pageState === 'processing' || pageState === 'monitoring') return
     if (positions.some((p) => p.status === 'ACTIVE')) return
@@ -621,12 +644,13 @@ export default function DashboardPage() {
     autoApprovedSignalIdRef.current = rawSignal.id
     const conf = (rawSignal.confidenceScore * 100).toFixed(0)
     const thresholdPct = Math.round(confThreshold * 100)
+    const overrideTag = regimeOverride !== undefined ? ` (adaptive ${regimeKey})` : ''
     toast({
       title: '🤖 Auto-approve fire',
-      description: `${rawSignal.signal} ${rawSignal.pair} · Confidence ${conf}% ≥ ${thresholdPct}%${isCounterD1 ? ' (counter-D1)' : ''} + vetos passed — eksekusi otomatis`,
+      description: `${rawSignal.signal} ${rawSignal.pair} · Confidence ${conf}% ≥ ${thresholdPct}%${overrideTag}${isCounterD1 ? ' counter-D1' : ''} + vetos passed — eksekusi otomatis`,
     })
     handleApprove()
-  }, [autoApprove, rawSignal, riskValidation, pageState, positions, handleApprove, toast, autoApproveMinConfidence])
+  }, [autoApprove, rawSignal, riskValidation, pageState, positions, handleApprove, toast, autoApproveMinConfidence, adaptiveRegimeOverrides])
 
   const handleHalt = async () => {
     const confirmed = typeof window !== 'undefined' &&

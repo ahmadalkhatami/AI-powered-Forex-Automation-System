@@ -337,6 +337,12 @@ export interface DynamicStructureResponse {
   dynamicSupport: TrendlineDto | null
 }
 
+// ── Adaptive Effective Thresholds (baseline + per-regime override) ──────
+export interface AdaptiveEffectiveResponse {
+  baselineAutoApprove: number
+  byRegime: Record<string, number>  // e.g. { "Ranging": 0.75, "Trending": 0.70 }
+}
+
 export interface SignalHeroData {
   id: string
   pair: string

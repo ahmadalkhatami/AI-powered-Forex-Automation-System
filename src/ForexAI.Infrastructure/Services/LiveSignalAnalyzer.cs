@@ -54,6 +54,31 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         => bars.Count <= 1 ? bars : bars.Take(bars.Count - 1).ToList();
 
     /// <summary>
+    /// Cooldown check with Adaptive Action 3 override support. Kalau Adaptive Engine
+    /// sudah tune cooldown untuk direction tertentu, pakai itu; otherwise fallback
+    /// ke baseline _systemState.CooldownMinutes.
+    /// </summary>
+    private bool IsInCooldownAdaptive(SignalDirection direction, out int minutesRemaining)
+    {
+        minutesRemaining = 0;
+        if (_systemState.LastLossDirection != direction) return false;
+        if (!_systemState.LastLossAt.HasValue) return false;
+
+        int cooldownMin = _systemState.CooldownMinutes;
+        if (_adaptiveState != null && !_adaptiveState.Current.MasterDisabled
+            && _adaptiveState.Current.CooldownOverride.TryGetValue(direction.ToString(), out var adapt))
+        {
+            cooldownMin = adapt;
+        }
+        if (cooldownMin <= 0) return false;
+
+        var elapsed = (DateTimeOffset.UtcNow - _systemState.LastLossAt.Value).TotalMinutes;
+        if (elapsed >= cooldownMin) return false;
+        minutesRemaining = (int)Math.Ceiling(cooldownMin - elapsed);
+        return true;
+    }
+
+    /// <summary>
     /// Deteksi breakout multi-confirmation: close candle terakhir di luar high/low N bar
     /// sebelumnya + check fakeout filter + compression + 3-factor confirmation.
     /// Default lookback=20 (4 jam M15, 20 jam H1, 20 hari D1).
@@ -190,9 +215,10 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         var (vetoSignal, vetoReasons) = ApplySetupVetos(signal, snap, momentum, pctFromSupport);
         signal = vetoSignal;
 
-        // ── 4d. Cooldown veto — block same direction setelah LOSS ──────────
-        if (signal != SignalDirection.HOLD &&
-            _systemState.IsInCooldown(signal, out var minRemaining))
+        // ── 4d. Cooldown veto — block same direction setelah LOSS.
+        // Adaptive Action 3 bisa override cooldown duration per direction; helper di bawah
+        // baca AdaptiveState.CooldownOverride[direction] kalau ada, fallback ke baseline.
+        if (signal != SignalDirection.HOLD && IsInCooldownAdaptive(signal, out var minRemaining))
         {
             vetoReasons.Add($"VETO: {signal} di-override ke HOLD — cooldown post-LOSS aktif {minRemaining} menit lagi.");
             signal = SignalDirection.HOLD;
@@ -230,7 +256,7 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
                 "Bearish" => SignalDirection.SELL,
                 _         => SignalDirection.HOLD
             };
-            if (promoteTo != SignalDirection.HOLD && !_systemState.IsInCooldown(promoteTo, out _))
+            if (promoteTo != SignalDirection.HOLD && !IsInCooldownAdaptive(promoteTo, out _))
             {
                 // Re-apply hard vetos — promote tidak boleh bypass reversal/overextension check.
                 var (recheck, recheckReasons) = ApplyHardVetos(promoteTo, snap, momentum, pctFromSupport);
@@ -286,7 +312,7 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
                     d1AlignTag = d1Bearish;
                 }
 
-                if (promoteTo.HasValue && !_systemState.IsInCooldown(promoteTo.Value, out _))
+                if (promoteTo.HasValue && !IsInCooldownAdaptive(promoteTo.Value, out _))
                 {
                     // Re-apply hard vetos — breakout promote tidak boleh bypass reversal check.
                     var (recheck, recheckReasons) = ApplyHardVetos(promoteTo.Value, snap, momentum, pctFromSupport);
@@ -342,6 +368,14 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         //       Pattern counter signal (e.g. Bearish Engulfing + BUY signal):
         //          penalty = reliability × 0.10 (likely trap, lower confidence)
         //       Neutral pattern (Doji, Inside Bar): no change — consolidation, no edge.
+        // Adaptive Action 4: pattern boost di-disable kalau Adaptive Engine sudah flag
+        // pattern ini sebagai underperform. Penalty (counter) tetap apply — kita masih
+        // mau hukum signal yang setup-nya lawan pattern terkenal, walaupun boost-nya off.
+        bool patternBoostDisabled =
+            _adaptiveState != null && !_adaptiveState.Current.MasterDisabled
+            && _adaptiveState.Current.PatternDisableUntil.TryGetValue(pattern.Name, out var disableUntil)
+            && disableUntil > DateTimeOffset.UtcNow;
+
         if (signal != SignalDirection.HOLD && pattern.Reliability >= 0.50m)
         {
             bool patternAligned =
@@ -351,12 +385,16 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
                 (pattern.Bias == "Bullish" && signal == SignalDirection.SELL) ||
                 (pattern.Bias == "Bearish" && signal == SignalDirection.BUY);
 
-            if (patternAligned)
+            if (patternAligned && !patternBoostDisabled)
             {
                 decimal boost = pattern.Reliability * 0.10m;
                 confidenceScore = Math.Min(confidenceScore + boost, 0.95m);
                 confluenceScore = Math.Min(confluenceScore + (int)Math.Round(boost * 100m), 100);
                 vetoReasons.Add($"PATTERN ALIGNED: {pattern.Name} ({pattern.Reliability:F2} reliability) supports {signal} — conf +{boost * 100m:F0}%.");
+            }
+            else if (patternAligned && patternBoostDisabled)
+            {
+                vetoReasons.Add($"PATTERN BOOST DISABLED: {pattern.Name} di-disable oleh Adaptive Engine (underperform) — no confidence boost.");
             }
             else if (patternCounter)
             {

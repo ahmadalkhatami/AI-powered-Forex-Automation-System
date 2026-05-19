@@ -379,16 +379,16 @@ Update setiap milestone selesai. Checkbox = done.
 - [ ] 4 minggu observe — collect ≥ 30 trade
 
 ### P2 — Tier 1 Activate
-- [ ] `AdaptiveStateService` — persist current overrides + audit history
-- [ ] `AdaptiveLearningService` BackgroundService — scheduled trigger
-- [ ] Global trade count gate (≥ 50) check di awal cycle
-- [ ] **Config snapshot protocol** — before/after/reason JSON files per change
-- [ ] Snapshot retention policy (last 50, rolling delete)
-- [ ] Endpoint `GET /api/adaptive/snapshots` + `POST /api/adaptive/rollback/{id}`
-- [ ] Action 1: Per-regime confidence threshold (with bounds + cooldown)
-- [ ] Action 2: Session penalty/skip (with auto re-enable timer)
-- [ ] Action 3: Cooldown length adaptation per direction
-- [ ] Action 4: Pattern enable/disable (with auto re-enable timer)
+- [x] `AdaptiveStateService` — persist current overrides + audit history (commit 8263b2d)
+- [x] `AdaptiveLearningService` BackgroundService — scheduled trigger (commit ac08eec)
+- [x] Global trade count gate (≥ 50) check di awal cycle
+- [x] **Config snapshot protocol** — before/after/reason JSON files per change
+- [x] Snapshot retention policy (last 50, rolling delete)
+- [x] Endpoint `GET /api/adaptive/snapshots` + `POST /api/adaptive/rollback/{id}`
+- [x] Action 1: Per-regime confidence threshold (with bounds + cooldown 24h) — commit ac08eec
+- [x] Action 2: Session penalty/skip (with auto re-enable timer 7d) — commit 98238ff
+- [x] Action 3: Cooldown length adaptation per direction
+- [x] Action 4: Pattern enable/disable (with auto re-enable timer 30d)
 - [ ] Performance regression detector — auto-revert
 - [ ] Frontend: adjustment history timeline + per-action kill switch + rollback button
 - [ ] 6 minggu live — validate edge improvement

@@ -1,4 +1,6 @@
 using ForexAI.Application.UseCases.GetAdaptiveStats;
+using ForexAI.Domain.Entities;
+using ForexAI.Domain.Enums;
 using ForexAI.Domain.Interfaces;
 using ForexAI.Domain.ValueObjects;
 using MediatR;
@@ -46,6 +48,24 @@ public class AdaptiveLearningService : BackgroundService
     private const decimal SessionPenaltyThresh  = 0.35m;  // WR < 35% → penalty
     private const decimal SessionSkipThresh     = 0.25m;  // WR < 25% → skip 7d
     private const int     SessionSkipMinSample  = 30;
+
+    // Cooldown adaptation (per roadmap § 3.3)
+    private const int     CooldownBaseline      = 30;     // minutes — sync dengan SystemStateService
+    private const int     CooldownMin           = 15;
+    private const int     CooldownMax           = 120;
+    private const int     CooldownExtendStep    = 15;     // extend +15 saat post-LOSS streak
+    private const int     CooldownShrinkStep    = -10;    // shrink -10 saat post-LOSS recovery good
+    private const int     CooldownObsWindowMin  = 30;     // observation window — "next trade dalam 30 menit setelah LOSS"
+    private const decimal CooldownExtendThresh  = 0.70m;  // follow-loss rate ≥ 70% → extend
+    private const decimal CooldownShrinkThresh  = 0.45m;  // follow-loss rate ≤ 45% (WR ≥ 55%) → shrink
+    private const int     CooldownMinSample     = 15;     // butuh ≥ 15 post-LOSS sequence
+    private static readonly TimeSpan CooldownActionCool = TimeSpan.FromHours(48);
+
+    // Pattern disable (per roadmap § 3.4)
+    private const decimal PatternDisableUpper   = 0.35m;  // Wilson upper < 35% → disable
+    private const int     PatternMinSample      = 20;
+    private static readonly TimeSpan PatternDisableDuration = TimeSpan.FromDays(30);
+    private static readonly TimeSpan PatternActionCool      = TimeSpan.FromDays(30);
 
     private readonly IServiceProvider _services;
     private readonly IAdaptiveStateService _adaptive;
@@ -114,7 +134,21 @@ public class AdaptiveLearningService : BackgroundService
         else
             _log.LogInformation("Adaptive cycle: SessionPenalty action disabled — skip");
 
-        // P2b3+: Action 3 (cooldown), Action 4 (pattern)
+        // ── Action 3: Cooldown length adaptation (per direction) ───────────
+        if (!_adaptive.Current.CooldownActionDisabled)
+        {
+            using var scope2 = _services.CreateScope();
+            var repo = scope2.ServiceProvider.GetRequiredService<ITradePositionRepository>();
+            await EvaluateCooldownAsync(repo, _adaptive.Current);
+        }
+        else
+            _log.LogInformation("Adaptive cycle: Cooldown action disabled — skip");
+
+        // ── Action 4: Pattern enable/disable ───────────────────────────────
+        if (!_adaptive.Current.PatternActionDisabled)
+            EvaluatePatternDisable(stats, _adaptive.Current);
+        else
+            _log.LogInformation("Adaptive cycle: Pattern action disabled — skip");
     }
 
     /// <summary>
@@ -283,6 +317,158 @@ public class AdaptiveLearningService : BackgroundService
                     "🤖 Adaptive ACTION fired: SessionPenalty[{Session}] {From}→{To} — {Reason} (snapshot={Snap})",
                     bucket.Label, current, target, reason, snapId);
             }
+        }
+    }
+
+    /// <summary>
+    /// Action 3: cooldown length adaptation per direction (BUY/SELL track terpisah).
+    /// Metric: dari semua LOSS trade arah X, berapa % yang next-same-direction trade
+    /// dalam 30 menit juga LOSS? Kalau ≥ 70% → extend cooldown (+15 min);
+    /// kalau ≤ 45% → shrink (-10 min). Bounds [15, 120], cooldown 48h per direction.
+    /// </summary>
+    private async Task EvaluateCooldownAsync(ITradePositionRepository repo, AdaptiveState state)
+    {
+        var all = await repo.GetAllAsync();
+        var closed = all
+            .Where(p => p.Status == TradeStatus.CLOSED_WIN || p.Status == TradeStatus.CLOSED_LOSS)
+            .Where(p => p.OpenedAt.HasValue && p.ClosedAt.HasValue)
+            .OrderBy(p => p.OpenedAt)
+            .ToList();
+
+        foreach (var direction in new[] { SignalDirection.BUY, SignalDirection.SELL })
+        {
+            var dirKey = direction.ToString();
+
+            // Find post-LOSS sequence pairs:
+            // (lossTrade, followTrade) where:
+            //   - lossTrade.Status == LOSS && lossTrade.Direction == direction
+            //   - followTrade.Direction == direction
+            //   - followTrade.OpenedAt - lossTrade.ClosedAt < CooldownObsWindowMin
+            int sequenceCount = 0;
+            int followLossCount = 0;
+            var sameDir = closed.Where(p => p.Direction == direction).ToList();
+            for (int i = 0; i < sameDir.Count - 1; i++)
+            {
+                if (sameDir[i].Status != TradeStatus.CLOSED_LOSS) continue;
+                var followTrade = sameDir[i + 1];
+                var gapMin = (followTrade.OpenedAt!.Value - sameDir[i].ClosedAt!.Value).TotalMinutes;
+                if (gapMin > CooldownObsWindowMin) continue;
+                sequenceCount++;
+                if (followTrade.Status == TradeStatus.CLOSED_LOSS) followLossCount++;
+            }
+
+            if (sequenceCount < CooldownMinSample)
+            {
+                _log.LogInformation(
+                    "Adaptive Cooldown[{Dir}]: sequence n={N} < {Min}, skip",
+                    dirKey, sequenceCount, CooldownMinSample);
+                continue;
+            }
+
+            decimal followLossRate = (decimal)followLossCount / sequenceCount;
+            int current = state.CooldownOverride.TryGetValue(dirKey, out var v) ? v : CooldownBaseline;
+
+            int? target = null;
+            string reason = "";
+            if (followLossRate >= CooldownExtendThresh && current < CooldownMax)
+            {
+                target = Math.Min(current + CooldownExtendStep, CooldownMax);
+                reason = $"Cooldown[{dirKey}]: post-LOSS follow-loss rate {followLossRate:P0} ≥ {CooldownExtendThresh:P0} " +
+                         $"(n={sequenceCount}) → extend +{CooldownExtendStep} min";
+            }
+            else if (followLossRate <= CooldownShrinkThresh && current > CooldownMin)
+            {
+                target = Math.Max(current + CooldownShrinkStep, CooldownMin);
+                reason = $"Cooldown[{dirKey}]: post-LOSS follow-loss rate {followLossRate:P0} ≤ {CooldownShrinkThresh:P0} " +
+                         $"(n={sequenceCount}) → shrink {CooldownShrinkStep} min";
+            }
+
+            if (target is null) continue;
+
+            // Cooldown 48h per direction
+            var lastAdjust = state.AuditHistory.FirstOrDefault(a =>
+                a.Action == "CooldownAdapt" && a.Bucket == dirKey);
+            if (lastAdjust != null && (DateTimeOffset.UtcNow - lastAdjust.Timestamp) < CooldownActionCool)
+            {
+                _log.LogInformation("Adaptive Cooldown[{Dir}]: would adjust but cooldown 48h active", dirKey);
+                continue;
+            }
+
+            var update = new AdaptiveStateUpdate(
+                CooldownOverrideSet: new Dictionary<string, int> { [dirKey] = target.Value });
+            var audit = new AdaptiveAuditEntry(
+                Timestamp:    DateTimeOffset.UtcNow,
+                Action:       "CooldownAdapt",
+                Bucket:       dirKey,
+                Parameter:    $"cooldownMinutes[{dirKey}]",
+                FromValue:    current.ToString(),
+                ToValue:      target.Value.ToString(),
+                Reason:       reason,
+                SampleSize:   sequenceCount,
+                WilsonLower:  null,
+                WilsonUpper:  null,
+                ExpectancyR:  null,
+                SnapshotId:   "");
+
+            var snapId = _adaptive.Apply(update, audit);
+            _log.LogWarning(
+                "🤖 Adaptive ACTION fired: CooldownAdapt[{Dir}] {From}→{To} min — {Reason} (snapshot={Snap})",
+                dirKey, current, target.Value, reason, snapId);
+        }
+    }
+
+    /// <summary>
+    /// Action 4: disable pattern boost kalau pattern ini consistently lose.
+    /// Trigger: Wilson upper 95% &lt; 35% selama ≥ 20 trade. Disable 30 hari (auto re-enable).
+    /// </summary>
+    private void EvaluatePatternDisable(AdaptiveStatsResult stats, AdaptiveState state)
+    {
+        foreach (var bucket in stats.ByPattern)
+        {
+            if (bucket.Trades < PatternMinSample) continue;
+            if (bucket.Label == "None") continue;  // "None" = no pattern, tidak ada boost untuk disable
+
+            if (bucket.WilsonUpper95 >= PatternDisableUpper) continue;  // bucket masih acceptable
+
+            // Sudah disabled?
+            if (state.PatternDisableUntil.TryGetValue(bucket.Label, out var until) && until > DateTimeOffset.UtcNow)
+            {
+                continue;  // masih dalam disable period
+            }
+
+            // Cooldown 30d per pattern (sama dengan disable duration)
+            var lastDisable = state.AuditHistory.FirstOrDefault(a =>
+                a.Action == "PatternDisable" && a.Bucket == bucket.Label);
+            if (lastDisable != null && (DateTimeOffset.UtcNow - lastDisable.Timestamp) < PatternActionCool)
+            {
+                continue;
+            }
+
+            var disableUntil = DateTimeOffset.UtcNow.Add(PatternDisableDuration);
+            string reason =
+                $"Pattern {bucket.Label}: WR {bucket.WinRate:P0} (Wilson 95% upper {bucket.WilsonUpper95:P0}) " +
+                $"< {PatternDisableUpper:P0}, n={bucket.Trades} — disable boost 30 hari (auto re-enable {disableUntil:yyyy-MM-dd})";
+
+            var update = new AdaptiveStateUpdate(
+                PatternDisableUntilSet: new Dictionary<string, DateTimeOffset> { [bucket.Label] = disableUntil });
+            var audit = new AdaptiveAuditEntry(
+                Timestamp:    DateTimeOffset.UtcNow,
+                Action:       "PatternDisable",
+                Bucket:       bucket.Label,
+                Parameter:    $"patternDisableUntil[{bucket.Label}]",
+                FromValue:    "active",
+                ToValue:      disableUntil.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                Reason:       reason,
+                SampleSize:   bucket.Trades,
+                WilsonLower:  bucket.WilsonLower95,
+                WilsonUpper:  bucket.WilsonUpper95,
+                ExpectancyR:  bucket.ExpectancyR,
+                SnapshotId:   "");
+
+            var snapId = _adaptive.Apply(update, audit);
+            _log.LogWarning(
+                "🤖 Adaptive ACTION fired: PatternDisable[{Pattern}] until {Until} — {Reason} (snapshot={Snap})",
+                bucket.Label, disableUntil, reason, snapId);
         }
     }
 }

@@ -22,7 +22,9 @@ public class SystemStateService : ISystemStateService
 
     public decimal MaxSpreadPips { get; private set; } = 2.5m;
     public int MaxConsecutiveLosses { get; private set; } = 3;
-    public int MaxHoldingMinutes { get; private set; } = 360;  // 6 jam (M15: 24 bars)
+    // Disabled by default per user choice 2026-05-19 — TP/SL sudah cover exit.
+    // Set > 0 via Settings UI untuk re-enable. Nano tier tetap hard 2h cap di sync service.
+    public int MaxHoldingMinutes { get; private set; } = 0;
 
     // Post-loss cooldown: setelah trade rugi, block same-direction selama 30 menit
     public SignalDirection? LastLossDirection { get; private set; }
@@ -70,7 +72,7 @@ public class SystemStateService : ISystemStateService
         {
             IsHalted = false; HaltReason = null; HaltedAt = null;
             LastLossDirection = null; LastLossAt = null;
-            MaxSpreadPips = 2.5m; MaxConsecutiveLosses = 3; MaxHoldingMinutes = 360; CooldownMinutes = 30;
+            MaxSpreadPips = 2.5m; MaxConsecutiveLosses = 3; MaxHoldingMinutes = 0; CooldownMinutes = 30;
             MaxTradesPerDay = 7;
         }
         Load();
@@ -127,7 +129,7 @@ public class SystemStateService : ISystemStateService
         {
             if (maxSpreadPips         is decimal m1 && m1 > 0m) MaxSpreadPips         = m1;
             if (maxConsecutiveLosses  is int     m2 && m2 > 0)  MaxConsecutiveLosses  = m2;
-            if (maxHoldingMinutes     is int     m3 && m3 > 0)  MaxHoldingMinutes     = m3;
+            if (maxHoldingMinutes     is int     m3 && m3 >= 0) MaxHoldingMinutes     = m3;  // 0 = disabled
             if (cooldownMinutes       is int     m4 && m4 >= 0) CooldownMinutes       = m4;
             if (nanoMaxDailyLossUsd   is decimal m5 && m5 > 0m) NanoMaxDailyLossUsd   = m5;
             if (nanoEquityFloorUsd    is decimal m6 && m6 > 0m) NanoEquityFloorUsd    = m6;
@@ -198,7 +200,7 @@ public class SystemStateService : ISystemStateService
                 HaltedAt             = snap.HaltedAt;
                 MaxSpreadPips        = snap.MaxSpreadPips > 0 ? snap.MaxSpreadPips : 2.5m;
                 MaxConsecutiveLosses = snap.MaxConsecutiveLosses > 0 ? snap.MaxConsecutiveLosses : 3;
-                MaxHoldingMinutes    = snap.MaxHoldingMinutes > 0 ? snap.MaxHoldingMinutes : 360;
+                MaxHoldingMinutes    = snap.MaxHoldingMinutes >= 0 ? snap.MaxHoldingMinutes : 0;
                 LastLossDirection    = snap.LastLossDirection;
                 LastLossAt           = snap.LastLossAt;
                 CooldownMinutes      = snap.CooldownMinutes > 0 ? snap.CooldownMinutes : 30;

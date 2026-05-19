@@ -51,10 +51,13 @@ Status legend:
 | Feature | Status | Notes |
 |---|---|---|
 | Fair Value Gap (FVG) | ✅ Live | [FairValueGapDetector.cs](../src/ForexAI.Infrastructure/Services/FairValueGapDetector.cs) — 3-candle gap, filled/unfilled tracking |
+| **Liquidity Sweep detection** | ✅ Live | [LiquidityDetector.cs](../src/ForexAI.Infrastructure/Services/LiquidityDetector.cs) — wick beyond 20-bar high/low + close back inside. Promote HOLD → BUY/SELL (opposite direction = reversal entry). Confidence boost +0.08..+0.12. |
+| **Swing High/Low pivot detection** | ✅ Live | Pivot points (high > N bar di kedua sisi) untuk defensive SL placement |
+| **Defensive SL placement** | ✅ Live | Push SL 3p beyond nearest swing level (within 5p proximity) — anti stop hunt. Lot auto-recalculate untuk maintain risk amount. |
+| **Round number magnet warning** | ✅ Live | Detect entry within ±5p dari 50/100 pip round number (e.g., 1.1700, 1.1650) — retail stop magnet, flag dengan warning |
 | Order Block (OB) | 📋 Planned | Last opposite candle before strong move — state tracking complex |
 | Break of Structure (BOS) | 📋 Planned | Swing high/low break, continuation signal |
 | Change of Character (CHoCH) | 📋 Planned | First opposite swing break, reversal signal |
-| Liquidity Sweep | ❌ Skip | Overlap dengan Fakeout Filter yang sudah ada |
 
 ### Breakout Detection (terintegrasi dengan signal)
 | Feature | Status | Notes |
@@ -92,7 +95,7 @@ Status legend:
 ### Trade Management (sudah open)
 | Feature | Status | Notes |
 |---|---|---|
-| Per-TF time stop | ✅ Live | M15=6h, H1=24h, D1=7d, Nano=2h apapun TF |
+| Time stop (auto-close by duration) | 🚧 Opt-in | **DISABLED by default** (per user choice 2026-05-19) — TP/SL sudah cover exit. Enable via Settings UI dengan set MaxHoldingMinutes > 0. Nano tier tetap hard 2h cap. |
 | Trailing stop | ✅ Live | Trigger +1.5R peak, close kalau retrace ≥1R (Standard) |
 | Breakeven trigger | ✅ Live | Setelah peak +1R, close kalau reverse ke entry |
 | Smart TP cap di S/R | ✅ Live | TP tidak menembus level support/resistance (buffer 3-5 pip) |

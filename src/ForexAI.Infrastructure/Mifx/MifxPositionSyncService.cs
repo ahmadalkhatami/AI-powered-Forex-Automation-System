@@ -51,13 +51,13 @@ public class MifxPositionSyncService
     }
 
     /// <summary>
-    /// Per-timeframe time stop — adapt sesuai signal TF asal trade.
-    /// Sehat untuk swing trader yang hold D1 setup beberapa hari.
-    /// Nano tier override: tetap agresif 2 jam apapun TF-nya (protect modal kecil).
+    /// Optional time stop — return null kalau disabled (default).
+    /// Nano tier tetap pakai cap 2h apapun setting (modal $30-60 safety).
+    /// User dapat enable via Settings UI dengan set MaxHoldingMinutes > 0.
     /// </summary>
-    private int GetTimeStopMinutes(string? timeframe)
+    private int? GetTimeStopMinutesOptional(string? timeframe)
     {
-        // Nano tier: cap 2h regardless of TF (protect modal $30-60)
+        // Nano tier: always cap 2h (hard safety untuk modal kecil)
         try
         {
             var account = _broker.GetAccountAsync().GetAwaiter().GetResult();
@@ -65,16 +65,10 @@ public class MifxPositionSyncService
             var tier = RiskTier.FromEquity(equity, _mode.CurrentMode);
             if (tier.Name == "nano") return 120;
         }
-        catch { /* fallback ke per-TF */ }
+        catch { /* fallback ke user setting */ }
 
-        // Per-TF: ~24 bar untuk scalp/intraday TF, 7 bar untuk swing D1
-        return timeframe switch
-        {
-            "M15" => 24 * 15,        //   360 min =  6 jam (24 bar M15)
-            "H1"  => 24 * 60,        //  1440 min = 24 jam (24 bar H1)
-            "D1"  => 7 * 24 * 60,    // 10080 min =  7 hari (7 bar D1)
-            _     => _systemState.MaxHoldingMinutes   // legacy fallback
-        };
+        // Non-nano: hanya enforce kalau user explicit set di Settings UI
+        return _systemState.MaxHoldingMinutes > 0 ? _systemState.MaxHoldingMinutes : (int?)null;
     }
 
     public MifxPositionSyncService(
@@ -160,18 +154,24 @@ public class MifxPositionSyncService
                     }
                 }
 
-                // Time stop — per-TF: M15=6h, H1=24h, D1=7days. Nano tier override ke 2h.
-                int timeStopMin = GetTimeStopMinutes(local.Timeframe);
-                if (timeStopMin > 0 && local.OpenedAt.HasValue)
+                // Time stop — disabled by default (user choice 2026-05-19).
+                // Rasionalnya: TP/SL sudah cover exit. Hanya enable kalau user
+                // explicit set _systemState.MaxHoldingMinutes > 0 via Settings UI.
+                // Nano tier tetap pakai cap 2h apapun setting (modal protection).
+                if (local.OpenedAt.HasValue)
                 {
-                    var ageMinutes = (DateTimeOffset.UtcNow - local.OpenedAt.Value).TotalMinutes;
-                    if (ageMinutes >= timeStopMin && !_closingInProgress.Contains(local.TradeId))
+                    int? hardCap = GetTimeStopMinutesOptional(local.Timeframe);
+                    if (hardCap.HasValue && hardCap.Value > 0)
                     {
-                        _logger.LogWarning(
-                            "Time stop fire: {Id} (TF={Tf}) held {Age:F0} min ≥ {Max} min — close otomatis",
-                            local.TradeId, local.Timeframe ?? "?", ageMinutes, timeStopMin);
-                        _closingInProgress.Add(local.TradeId);
-                        FireCloseWithLogging(local);
+                        var ageMinutes = (DateTimeOffset.UtcNow - local.OpenedAt.Value).TotalMinutes;
+                        if (ageMinutes >= hardCap.Value && !_closingInProgress.Contains(local.TradeId))
+                        {
+                            _logger.LogWarning(
+                                "Time stop fire: {Id} (TF={Tf}) held {Age:F0} min ≥ {Max} min — close otomatis",
+                                local.TradeId, local.Timeframe ?? "?", ageMinutes, hardCap.Value);
+                            _closingInProgress.Add(local.TradeId);
+                            FireCloseWithLogging(local);
+                        }
                     }
                 }
             }

@@ -179,7 +179,34 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             signal = SignalDirection.HOLD;
         }
 
-        // ── 4f. Breakout detection — multi-confirmation + fakeout filter + compression
+        // ── 4f. Liquidity sweep detection — promote HOLD ke BUY/SELL kalau ada sweep
+        //       (smart money just grabbed retail stops, high-probability reversal).
+        //       Higher priority than breakout (reversal signal stronger).
+        var sweepCandles = _candleFeed.Get(snap.Pair, snap.Timeframe, 22);
+        var liquiditySweep = LiquidityDetector.DetectSweep(sweepCandles);
+        if (liquiditySweep.Detected && signal == SignalDirection.HOLD)
+        {
+            if (liquiditySweep.Direction == "Bullish" &&
+                !_systemState.IsInCooldown(SignalDirection.BUY, out _))
+            {
+                vetoReasons.Add($"LIQUIDITY SWEEP: HOLD → BUY — {liquiditySweep.Description}");
+                signal = SignalDirection.BUY;
+            }
+            else if (liquiditySweep.Direction == "Bearish" &&
+                     !_systemState.IsInCooldown(SignalDirection.SELL, out _))
+            {
+                vetoReasons.Add($"LIQUIDITY SWEEP: HOLD → SELL — {liquiditySweep.Description}");
+                signal = SignalDirection.SELL;
+            }
+        }
+
+        // ── 4g. Round number magnet warning ─────────────────────────────────
+        if (LiquidityDetector.IsNearRoundNumber(snap.CurrentPrice, out var roundLevel, out var pipsToRound))
+        {
+            vetoReasons.Add($"LIQUIDITY WARN: price {pipsToRound:F1}p dari round number {roundLevel:F4} — retail stop magnet, watch for stop hunt.");
+        }
+
+        // ── 4h. Breakout detection — multi-confirmation + fakeout filter + compression
         //       Promote HOLD ke BUY/SELL kalau breakout valid + aligned dengan D1.
         var breakout = DetectBreakout(snap.Pair, snap.Timeframe, snap.RSI14);
         if (breakout.Direction != BreakoutDirection.None)
@@ -220,6 +247,17 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
 
         // ── 5. Scores ───────────────────────────────────────────────────────
         var (confluenceScore, confidenceScore) = CalculateScores(trend, momentum, structure, signal, snap.Regime);
+
+        // ── 5a-bis. Liquidity sweep confidence boost — aligned reversal high edge.
+        if (liquiditySweep.Detected &&
+            ((liquiditySweep.Direction == "Bullish" && signal == SignalDirection.BUY) ||
+             (liquiditySweep.Direction == "Bearish" && signal == SignalDirection.SELL)))
+        {
+            // Boost +0.08 (small sweep 1-3p) atau +0.12 (strong sweep >3p)
+            decimal boost = liquiditySweep.PipsBeyond >= 3m ? 0.12m : 0.08m;
+            confidenceScore = Math.Min(confidenceScore + boost, 0.95m);
+            confluenceScore = Math.Min(confluenceScore + (int)Math.Round(boost * 100m), 100);
+        }
 
         // ── 5b. Breakout confidence boost — scale by quality (confirmations + compression)
         //       Aligned breakout + 3 confirmations + compression = best setup = +0.15
@@ -278,6 +316,28 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
 
         // ── 6. Trade parameters (mode + tier-aware risk) ──────────────────
         var parameters = CalculateParameters(snap, signal, equity, _mode.CurrentMode);
+
+        // ── 6b. Defensive SL adjustment — push SL beyond swing levels (anti stop hunt)
+        if (signal != SignalDirection.HOLD && sweepCandles.Count >= 20)
+        {
+            var swings = LiquidityDetector.FindSwingPoints(sweepCandles, lookback: 20);
+            var adjustment = LiquidityDetector.AdjustStopLoss(parameters.StopLoss, parameters.Entry, signal, swings);
+            if (adjustment != null)
+            {
+                vetoReasons.Add(adjustment.Reason);
+                // Recalculate lot supaya risk amount tetap (SL lebar → lot lebih kecil)
+                int newSlPips = (int)Math.Round(Math.Abs(parameters.Entry - adjustment.AdjustedSl) / 0.0001m);
+                decimal newLot = Math.Max(Math.Round(parameters.RiskAmount / (newSlPips * 10m), 2), 0.01m);
+                decimal newProfit = Math.Round(newLot * parameters.TakeProfitPips * 10m, 2);
+                decimal newRR = newSlPips > 0 ? Math.Round((decimal)parameters.TakeProfitPips / newSlPips, 2) : parameters.RiskRewardRatio;
+                parameters = parameters with {
+                    StopLoss = adjustment.AdjustedSl,
+                    StopLossPips = newSlPips,
+                    LotSize = newLot,
+                    PotentialProfit = newProfit,
+                    RiskRewardRatio = newRR };
+            }
+        }
 
         // ── 7. Warnings ─────────────────────────────────────────────────────
         var warnings = BuildWarnings(snap, signal, confidenceScore, trend, momentum);

@@ -717,6 +717,13 @@ export default function DashboardPage() {
   // Auto-draw saat sinyal generated: tradingview-style box muncul otomatis di chart.
   // ID stabil per trade/signal — kalau user dismiss, box stay-hidden sampai trade/signal baru muncul.
   const activePosition = positions.find((p) => p.status === 'ACTIVE')
+  // Pending overlay (SL/TP/Entry box di chart) hanya ditampilkan kalau signal actionable:
+  // - bukan HOLD
+  // - risk gate TIDAK NO-GO (kalau decision NO-GO, sinyal tidak bisa di-execute → jangan tease user dengan box yang misleading)
+  const signalIsActionable = !!rawSignal
+    && rawSignal.signal !== 'HOLD'
+    && (!riskValidation || riskValidation.decision !== 'NO-GO')
+
   const tradeOverlay = activePosition
     ? {
         id:              `active-${activePosition.tradeId}`,
@@ -735,7 +742,7 @@ export default function DashboardPage() {
           ? Math.floor(new Date(activePosition.openedAt).getTime() / 1000)
           : undefined,
       }
-    : riskValidation?.validatedParameters && rawSignal && rawSignal.signal !== 'HOLD'
+    : signalIsActionable && rawSignal && (rawSignal.signal === 'BUY' || rawSignal.signal === 'SELL') && riskValidation?.validatedParameters
       ? {
           id:              `pending-validated-${rawSignal.id}`,
           entry:           riskValidation.validatedParameters.entry,
@@ -749,7 +756,7 @@ export default function DashboardPage() {
           riskReward:      riskValidation.validatedParameters.riskRewardRatio,
           confidence:      Math.round((rawSignal.confidenceScore ?? 0) * 100),
         }
-      : rawSignal && rawSignal.signal !== 'HOLD'
+      : signalIsActionable && rawSignal && (rawSignal.signal === 'BUY' || rawSignal.signal === 'SELL')
         ? {
             id:              `pending-signal-${rawSignal.id}`,
             entry:           rawSignal.parameters.entry,

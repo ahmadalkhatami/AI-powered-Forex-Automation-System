@@ -15,6 +15,7 @@ import { CandlestickChart } from '@/components/dashboard/CandlestickChart'
 import { MifxLiveTicker } from '@/components/dashboard/MifxLiveTicker'
 import { SessionChip } from '@/components/dashboard/SessionChip'
 import { NewsAlertBanner } from '@/components/dashboard/NewsAlertBanner'
+import { MultiTfMaChip } from '@/components/dashboard/MultiTfMaChip'
 import { useToast } from '@/hooks/use-toast'
 import { useDashboardStream } from '@/lib/useDashboardStream'
 import {
@@ -1026,6 +1027,7 @@ export default function DashboardPage() {
               <RefreshCw className={cn('h-3.5 w-3.5', pageState === 'loading' && 'animate-spin')} />
               Trigger Analysis
             </Button>
+            <MultiTfMaChip snapshot={rawSignal?.snapshot} />
             <SessionChip />
           </div>
         </div>

@@ -18,13 +18,20 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
     private readonly ISystemStateService _systemState;
     private readonly IModeService _mode;
     private readonly MifxCandleFeed _candleFeed;
+    private readonly IAdaptiveStateService? _adaptiveState;  // optional — null safe untuk BacktestRunner stub
 
-    public LiveSignalAnalyzer(IBrokerService broker, ISystemStateService systemState, IModeService mode, MifxCandleFeed candleFeed)
+    public LiveSignalAnalyzer(
+        IBrokerService broker,
+        ISystemStateService systemState,
+        IModeService mode,
+        MifxCandleFeed candleFeed,
+        IAdaptiveStateService? adaptiveState = null)
     {
-        _broker      = broker;
-        _systemState = systemState;
-        _mode        = mode;
-        _candleFeed  = candleFeed;
+        _broker        = broker;
+        _systemState   = systemState;
+        _mode          = mode;
+        _candleFeed    = candleFeed;
+        _adaptiveState = adaptiveState;
     }
 
     /// <summary>Breakout detection hasil — dipakai untuk override HOLD + boost confidence.</summary>
@@ -191,6 +198,23 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             signal = SignalDirection.HOLD;
         }
 
+        // ── 4d-bis. Adaptive Session Skip (Action 2) — block kalau Adaptive Engine sudah
+        //          flag session ini sebagai losing. Re-enable otomatis setelah skipUntil expired.
+        if (signal != SignalDirection.HOLD && _adaptiveState != null && !string.IsNullOrEmpty(snap.Session))
+        {
+            var adaptive = _adaptiveState.Current;
+            if (!adaptive.MasterDisabled
+                && adaptive.SessionSkipUntil.TryGetValue(snap.Session, out var skipUntil)
+                && skipUntil > DateTimeOffset.UtcNow)
+            {
+                var hoursLeft = (int)(skipUntil - DateTimeOffset.UtcNow).TotalHours;
+                vetoReasons.Add(
+                    $"ADAPTIVE SESSION SKIP: {signal} di-override ke HOLD — session {snap.Session} di-skip oleh Adaptive Engine " +
+                    $"sampai {skipUntil:yyyy-MM-dd HH:mm} UTC ({hoursLeft}h tersisa).");
+                signal = SignalDirection.HOLD;
+            }
+        }
+
         // ── 4f. Liquidity sweep detection — promote HOLD ke BUY/SELL kalau ada sweep
         //       (smart money just grabbed retail stops, high-probability reversal).
         //       Higher priority than breakout (reversal signal stronger).
@@ -340,6 +364,22 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
                 confidenceScore = Math.Max(confidenceScore - penalty, 0.35m);
                 confluenceScore = Math.Max(confluenceScore - (int)Math.Round(penalty * 100m), 0);
                 vetoReasons.Add($"PATTERN COUNTER: {pattern.Name} ({pattern.Reliability:F2} reliability) lawan {signal} — possible trap, conf -{penalty * 100m:F0}%.");
+            }
+        }
+
+        // ── 5b-bis. Adaptive Session Penalty (Action 2) — subtract confidence kalau
+        //           Adaptive Engine sudah flag session ini sebagai underperform.
+        if (signal != SignalDirection.HOLD && _adaptiveState != null && !string.IsNullOrEmpty(snap.Session))
+        {
+            var adaptive = _adaptiveState.Current;
+            if (!adaptive.MasterDisabled &&
+                adaptive.SessionPenalty.TryGetValue(snap.Session, out var sessionPenalty) &&
+                sessionPenalty > 0m)
+            {
+                confidenceScore = Math.Max(confidenceScore - sessionPenalty, 0.35m);
+                confluenceScore = Math.Max(confluenceScore - (int)Math.Round(sessionPenalty * 100m), 0);
+                vetoReasons.Add(
+                    $"ADAPTIVE SESSION PENALTY: {snap.Session} session underperform — conf -{sessionPenalty * 100m:F0}%.");
             }
         }
 

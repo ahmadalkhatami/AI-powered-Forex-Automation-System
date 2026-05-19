@@ -28,6 +28,7 @@ public class AdaptiveLearningService : BackgroundService
     private static readonly TimeSpan TickInterval     = TimeSpan.FromHours(6);
     private static readonly TimeSpan StartupDelay     = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan ActionCooldownH  = TimeSpan.FromHours(24);
+    private static readonly TimeSpan SessionSkipCool  = TimeSpan.FromDays(7);    // cooldown after skip activate
 
     // Per-regime threshold bounds (per roadmap § 3.1)
     private const decimal Baseline      = 0.70m;
@@ -38,6 +39,13 @@ public class AdaptiveLearningService : BackgroundService
     // Statistical gates (per roadmap § 4)
     private const decimal RaiseUpperCap = 0.40m;  // Wilson upper < 40% → bucket truly losing
     private const decimal LowerLowerCap = 0.60m;  // Wilson lower > 60% → bucket truly winning
+
+    // Session penalty (per roadmap § 3.2)
+    private const decimal SessionPenaltyStep    = 0.05m;
+    private const decimal SessionPenaltyMax     = 0.15m;
+    private const decimal SessionPenaltyThresh  = 0.35m;  // WR < 35% → penalty
+    private const decimal SessionSkipThresh     = 0.25m;  // WR < 25% → skip 7d
+    private const int     SessionSkipMinSample  = 30;
 
     private readonly IServiceProvider _services;
     private readonly IAdaptiveStateService _adaptive;
@@ -100,7 +108,13 @@ public class AdaptiveLearningService : BackgroundService
         else
             _log.LogInformation("Adaptive cycle: RegimeThreshold action disabled — skip");
 
-        // P2b2+: Action 2 (session penalty), Action 3 (cooldown), Action 4 (pattern)
+        // ── Action 2: Session penalty / skip ───────────────────────────────
+        if (!state.SessionPenaltyActionDisabled)
+            EvaluateSessionPenalty(stats, _adaptive.Current);  // re-read state setelah Action 1
+        else
+            _log.LogInformation("Adaptive cycle: SessionPenalty action disabled — skip");
+
+        // P2b3+: Action 3 (cooldown), Action 4 (pattern)
     }
 
     /// <summary>
@@ -168,6 +182,107 @@ public class AdaptiveLearningService : BackgroundService
             _log.LogWarning(
                 "🤖 Adaptive ACTION fired: RegimeThreshold[{Regime}] {From}→{To} — {Reason} (snapshot={Snap})",
                 bucket.Label, current, target.Value, reason, snapshotId);
+        }
+    }
+
+    /// <summary>
+    /// Action 2: kalau session WR rendah signifikan, escalate dari penalty → skip:
+    /// <list type="bullet">
+    ///   <item>WR &lt; 35% &amp; n ≥ 20: penalty +5% (capped at -15%)</item>
+    ///   <item>WR &lt; 25% &amp; n ≥ 30: skip session 7 hari (auto re-enable)</item>
+    /// </list>
+    /// Cooldown 7d setelah skip activate, 24h untuk penalty adjust.
+    /// </summary>
+    private void EvaluateSessionPenalty(AdaptiveStatsResult stats, AdaptiveState state)
+    {
+        foreach (var bucket in stats.BySession)
+        {
+            if (!bucket.BucketReady) continue;  // butuh ≥ 20 trade
+            if (bucket.Label == "Unknown" || bucket.Label == "Closed") continue;
+
+            // ── Skip escalation: very low WR + larger sample ────────────────
+            if (bucket.WilsonUpper95 < SessionSkipThresh && bucket.Trades >= SessionSkipMinSample)
+            {
+                // Cooldown 7d untuk skip
+                var lastSkip = state.AuditHistory.FirstOrDefault(a =>
+                    a.Action == "SessionSkip" && a.Bucket == bucket.Label);
+                if (lastSkip != null && (DateTimeOffset.UtcNow - lastSkip.Timestamp) < SessionSkipCool)
+                {
+                    _log.LogInformation(
+                        "Adaptive SessionSkip {Session}: would activate but cooldown 7d active",
+                        bucket.Label);
+                    continue;
+                }
+
+                var skipUntil = DateTimeOffset.UtcNow.Add(SessionSkipCool);
+                string skipReason =
+                    $"Session {bucket.Label}: WR {bucket.WinRate:P0} (Wilson 95% upper {bucket.WilsonUpper95:P0}) " +
+                    $"< {SessionSkipThresh:P0}, n={bucket.Trades} — skip 7 hari (auto re-enable {skipUntil:yyyy-MM-dd})";
+
+                var skipUpdate = new AdaptiveStateUpdate(
+                    SessionSkipUntilSet: new Dictionary<string, DateTimeOffset> { [bucket.Label] = skipUntil });
+                var skipAudit = new AdaptiveAuditEntry(
+                    Timestamp:    DateTimeOffset.UtcNow,
+                    Action:       "SessionSkip",
+                    Bucket:       bucket.Label,
+                    Parameter:    $"sessionSkipUntil[{bucket.Label}]",
+                    FromValue:    "active",
+                    ToValue:      skipUntil.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+                    Reason:       skipReason,
+                    SampleSize:   bucket.Trades,
+                    WilsonLower:  bucket.WilsonLower95,
+                    WilsonUpper:  bucket.WilsonUpper95,
+                    ExpectancyR:  bucket.ExpectancyR,
+                    SnapshotId:   "");
+
+                var snapId = _adaptive.Apply(skipUpdate, skipAudit);
+                _log.LogWarning(
+                    "🤖 Adaptive ACTION fired: SessionSkip[{Session}] until {Until} — {Reason} (snapshot={Snap})",
+                    bucket.Label, skipUntil, skipReason, snapId);
+                continue;
+            }
+
+            // ── Penalty adjustment: moderately low WR ───────────────────────
+            if (bucket.WilsonUpper95 < SessionPenaltyThresh)
+            {
+                decimal current = state.SessionPenalty.TryGetValue(bucket.Label, out var v) ? v : 0m;
+                if (current >= SessionPenaltyMax) continue;  // already at cap
+
+                decimal target = Math.Min(current + SessionPenaltyStep, SessionPenaltyMax);
+
+                // Cooldown 24h per session penalty adjust
+                var lastAdjust = state.AuditHistory.FirstOrDefault(a =>
+                    a.Action == "SessionPenalty" && a.Bucket == bucket.Label);
+                if (lastAdjust != null && (DateTimeOffset.UtcNow - lastAdjust.Timestamp) < ActionCooldownH)
+                {
+                    continue;
+                }
+
+                string reason =
+                    $"Session {bucket.Label}: WR {bucket.WinRate:P0} (Wilson 95% upper {bucket.WilsonUpper95:P0}) " +
+                    $"< {SessionPenaltyThresh:P0}, n={bucket.Trades} → confidence penalty +{SessionPenaltyStep:F2}";
+
+                var update = new AdaptiveStateUpdate(
+                    SessionPenaltySet: new Dictionary<string, decimal> { [bucket.Label] = target });
+                var audit = new AdaptiveAuditEntry(
+                    Timestamp:    DateTimeOffset.UtcNow,
+                    Action:       "SessionPenalty",
+                    Bucket:       bucket.Label,
+                    Parameter:    $"sessionPenalty[{bucket.Label}]",
+                    FromValue:    current.ToString("F2"),
+                    ToValue:      target.ToString("F2"),
+                    Reason:       reason,
+                    SampleSize:   bucket.Trades,
+                    WilsonLower:  bucket.WilsonLower95,
+                    WilsonUpper:  bucket.WilsonUpper95,
+                    ExpectancyR:  bucket.ExpectancyR,
+                    SnapshotId:   "");
+
+                var snapId = _adaptive.Apply(update, audit);
+                _log.LogWarning(
+                    "🤖 Adaptive ACTION fired: SessionPenalty[{Session}] {From}→{To} — {Reason} (snapshot={Snap})",
+                    bucket.Label, current, target, reason, snapId);
+            }
         }
     }
 }

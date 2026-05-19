@@ -79,6 +79,37 @@ public class PatternController : ControllerBase
             Filled: z.Filled,
             SizePips: z.SizePips)).ToArray();
     }
+
+    /// <summary>
+    /// Order Block (OB) detection per-TF. Last opposite-direction candle sebelum
+    /// strong impulse move — SMC zone yang sering di-mitigate sebelum continuation.
+    /// Return semua OB dari 60 bar terakhir + flag mitigated/unmitigated.
+    /// </summary>
+    [HttpGet("orderblock")]
+    public ActionResult<OrderBlockResponse> OrderBlocks([FromQuery] string pair = "EURUSD")
+    {
+        var result = new OrderBlockResponse(
+            Pair: pair,
+            M15: DetectObForTimeframe(pair, "M15"),
+            H1:  DetectObForTimeframe(pair, "H1"),
+            D1:  DetectObForTimeframe(pair, "D1"));
+        return Ok(result);
+    }
+
+    private OrderBlockDto[] DetectObForTimeframe(string pair, string timeframe)
+    {
+        var candles = _candleFeed.Get(pair, timeframe, 60);
+        if (candles.Count < 5) return Array.Empty<OrderBlockDto>();
+
+        var blocks = OrderBlockDetector.Detect(candles);
+        return blocks.Select(b => new OrderBlockDto(
+            Bias:      b.Bias,
+            Top:       b.Top,
+            Bottom:    b.Bottom,
+            FormedAt:  b.FormedAt,
+            SizePips:  b.SizePips,
+            Mitigated: b.Mitigated)).ToArray();
+    }
 }
 
 public record PatternDetectionResponse(
@@ -108,3 +139,17 @@ public record FvgZoneDto(
     long ExpiresAfter,
     bool Filled,
     decimal SizePips);
+
+public record OrderBlockResponse(
+    string Pair,
+    OrderBlockDto[] M15,
+    OrderBlockDto[] H1,
+    OrderBlockDto[] D1);
+
+public record OrderBlockDto(
+    string Bias,             // Bullish / Bearish
+    decimal Top,
+    decimal Bottom,
+    long FormedAt,
+    decimal SizePips,
+    bool Mitigated);         // true = price sudah revisit zone

@@ -30,6 +30,7 @@ import {
   resumeSystem,
   fetchPatterns,
   fetchFvg,
+  fetchOrderBlocks,
   fetchDynamicStructure,
   fetchAdaptiveEffective,
   getSettings,
@@ -51,6 +52,7 @@ import type {
   MifxStatusResponse,
   PatternResponse,
   FvgDetectionResponse,
+  OrderBlockResponse,
   DynamicStructureResponse,
   TimeframePattern,
 } from '@/lib/types'
@@ -191,6 +193,7 @@ export default function DashboardPage() {
   const [chartWideMode, setChartWideMode] = useState(false)
   const [patterns, setPatterns] = useState<PatternResponse | null>(null)
   const [fvgZones, setFvgZones] = useState<FvgDetectionResponse | null>(null)
+  const [orderBlocks, setOrderBlocks] = useState<OrderBlockResponse | null>(null)
   const [dynamicStructure, setDynamicStructure] = useState<DynamicStructureResponse | null>(null)
   // Per-regime adaptive threshold overrides — populated saat Adaptive Engine fire Action 1
   const [adaptiveRegimeOverrides, setAdaptiveRegimeOverrides] = useState<Record<string, number>>({})
@@ -345,6 +348,20 @@ export default function DashboardPage() {
       try {
         const f = await fetchFvg('EURUSD')
         if (alive) setFvgZones(f)
+      } catch { /* silent */ }
+    }
+    fetchOnce()
+    const id = setInterval(fetchOnce, 60_000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+
+  // Order Blocks — poll 60s, similar update cadence dengan FVG
+  useEffect(() => {
+    let alive = true
+    const fetchOnce = async () => {
+      try {
+        const o = await fetchOrderBlocks('EURUSD')
+        if (alive) setOrderBlocks(o)
       } catch { /* silent */ }
     }
     fetchOnce()
@@ -858,6 +875,14 @@ export default function DashboardPage() {
     chartTimeframe === 'D1'  ? fvgZones.d1  :
     []
 
+  // Order Blocks untuk TF aktif
+  const activeOrderBlocks =
+    orderBlocks === null ? [] :
+    chartTimeframe === 'M15' ? orderBlocks.m15 :
+    chartTimeframe === 'H1'  ? orderBlocks.h1  :
+    chartTimeframe === 'D1'  ? orderBlocks.d1  :
+    []
+
   return (
     <div className={cn(
       'grid grid-cols-1 gap-4',
@@ -1014,6 +1039,7 @@ export default function DashboardPage() {
           pattern={activePattern}
           dynamicStructure={dynamicStructure}
           fvgZones={activeFvgZones}
+          orderBlocks={activeOrderBlocks}
           onTimeframeChange={setChartTimeframe}
           isMifxConnected={mifxStatus?.connected ?? false}
           isWideMode={chartWideMode}

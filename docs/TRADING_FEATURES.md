@@ -56,7 +56,7 @@ Status legend:
 | **Swing High/Low pivot detection** | ✅ Live | Pivot points (high > N bar di kedua sisi) untuk defensive SL placement |
 | **Defensive SL placement** | ✅ Live | Push SL 3p beyond nearest swing level (within 5p proximity) — anti stop hunt. Lot auto-recalculate untuk maintain risk amount. |
 | **Round number magnet warning** | ✅ Live | Detect entry within ±5p dari 50/100 pip round number (e.g., 1.1700, 1.1650) — retail stop magnet, flag dengan warning |
-| Order Block (OB) | 📋 Planned | Last opposite candle before strong move — state tracking complex |
+| Order Block (OB) | ✅ Live | [OrderBlockDetector.cs](../src/ForexAI.Infrastructure/Services/OrderBlockDetector.cs) — last opposite candle sebelum 3-bar impulse ≥ 10p. Endpoint `/api/pattern/orderblock`. [OrderBlockOverlay.tsx](../frontend/src/components/dashboard/OrderBlockOverlay.tsx) render zone dengan diagonal hatching + solid border (distinct dari FVG dashed). Unmitigated OB lebih bold, Mitigated faded. Label badge "OB ↑ 12p" / "OB ↓ 8p". Polling 60s. |
 | Break of Structure (BOS) | ✅ Live | [StructureBreakDetector.cs](../src/ForexAI.Infrastructure/Services/StructureBreakDetector.cs) — close di atas latest swing high (Bullish) atau di bawah latest swing low (Bearish), CONTEXT: trend continuation. Triangle marker di chart. |
 | Change of Character (CHoCH) | ✅ Live | Same detector — close di atas latest **Lower High** (reversal up) atau di bawah latest **Higher Low** (reversal down). Circle marker (Major significance) di chart, lebih bold daripada BOS. |
 

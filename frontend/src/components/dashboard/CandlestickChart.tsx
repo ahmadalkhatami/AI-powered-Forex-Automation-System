@@ -32,7 +32,8 @@ import { PatternHighlightOverlay } from './PatternHighlightOverlay'
 import { SupportResistanceOverlay } from './SupportResistanceOverlay'
 import { DynamicSROverlay, type SwingPoint, type Trendline, type BreakEvent } from './DynamicSROverlay'
 import { FvgOverlay } from './FvgOverlay'
-import type { FvgZoneDto } from '@/lib/types'
+import { OrderBlockOverlay } from './OrderBlockOverlay'
+import type { FvgZoneDto, OrderBlockDto } from '@/lib/types'
 import type { TimeframePattern } from '@/lib/types'
 
 interface TradeOverlay {
@@ -78,6 +79,7 @@ interface Props {
     breakEvents?: BreakEvent[]
   } | null
   fvgZones?: FvgZoneDto[] | null
+  orderBlocks?: OrderBlockDto[] | null
   onTimeframeChange?: (tf: ChartTimeframe) => void
   isMifxConnected?: boolean
   isWideMode?: boolean
@@ -116,6 +118,7 @@ export function CandlestickChart({
   pattern,
   dynamicStructure,
   fvgZones,
+  orderBlocks,
   onTimeframeChange,
   isMifxConnected,
   isWideMode = false,
@@ -774,6 +777,13 @@ export function CandlestickChart({
             chart={mainChartRef.current}
             series={candleSeriesRef.current}
             zones={fvgZones ?? []}
+            width={chartSize.width}
+            height={chartSize.height}
+          />
+          <OrderBlockOverlay
+            chart={mainChartRef.current}
+            series={candleSeriesRef.current}
+            blocks={orderBlocks ?? []}
             width={chartSize.width}
             height={chartSize.height}
           />

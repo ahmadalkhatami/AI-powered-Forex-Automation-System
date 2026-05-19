@@ -15,6 +15,7 @@ import type {
   BacktestResult,
   PatternResponse,
   FvgDetectionResponse,
+  OrderBlockResponse,
   SettingsResponse,
   SettingsUpdateRequest,
   AdaptiveStatsResponse,
@@ -173,6 +174,11 @@ export async function fetchPatterns(pair: string = 'EURUSD'): Promise<PatternRes
 // ── Fair Value Gap (FVG) zones per-TF ───────────────────────────────────
 export async function fetchFvg(pair: string = 'EURUSD'): Promise<FvgDetectionResponse> {
   return fetchApi(`/api/pattern/fvg?pair=${encodeURIComponent(pair)}`)
+}
+
+// ── Order Block (OB) zones per-TF ────────────────────────────────────────
+export async function fetchOrderBlocks(pair: string = 'EURUSD'): Promise<OrderBlockResponse> {
+  return fetchApi(`/api/pattern/orderblock?pair=${encodeURIComponent(pair)}`)
 }
 
 // ── Settings (safety thresholds config) ─────────────────────────────────

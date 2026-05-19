@@ -370,6 +370,23 @@ export interface FvgDetectionResponse {
   d1: FvgZoneDto[]
 }
 
+// ── Order Block (OB) — SMC institutional zone ─────────────────────────────
+export interface OrderBlockDto {
+  bias: 'Bullish' | 'Bearish'
+  top: number
+  bottom: number
+  formedAt: number          // Unix seconds — candle yang form OB
+  sizePips: number
+  mitigated: boolean        // true = price sudah revisit zone (less actionable)
+}
+
+export interface OrderBlockResponse {
+  pair: string
+  m15: OrderBlockDto[]
+  h1: OrderBlockDto[]
+  d1: OrderBlockDto[]
+}
+
 // ── Adaptive State (current overrides + audit history) ───────────────────
 export interface AdaptiveAuditEntry {
   timestamp: string             // ISO

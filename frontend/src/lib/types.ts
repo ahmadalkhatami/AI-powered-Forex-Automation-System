@@ -343,6 +343,36 @@ export interface AdaptiveEffectiveResponse {
   byRegime: Record<string, number>  // e.g. { "Ranging": 0.75, "Trending": 0.70 }
 }
 
+// ── Adaptive State (current overrides + audit history) ───────────────────
+export interface AdaptiveAuditEntry {
+  timestamp: string             // ISO
+  action: string                // RegimeThreshold / SessionPenalty / SessionSkip / CooldownAdapt / PatternDisable / Revert
+  bucket: string                // e.g. "Ranging" / "Tokyo" / "Bullish Pin Bar" / "BUY"
+  parameter: string
+  fromValue: string
+  toValue: string
+  reason: string
+  sampleSize: number
+  wilsonLower: number | null
+  wilsonUpper: number | null
+  expectancyR: number | null
+  snapshotId: string
+}
+
+export interface AdaptiveStateResponse {
+  masterDisabled: boolean
+  regimeThresholdActionDisabled: boolean
+  sessionPenaltyActionDisabled: boolean
+  cooldownActionDisabled: boolean
+  patternActionDisabled: boolean
+  regimeThresholdOverride: Record<string, number>
+  sessionPenalty: Record<string, number>
+  sessionSkipUntil: Record<string, string>            // ISO timestamps
+  cooldownOverride: Record<string, number>            // direction (BUY/SELL) → minutes
+  patternDisableUntil: Record<string, string>
+  auditHistory: AdaptiveAuditEntry[]
+}
+
 export interface SignalHeroData {
   id: string
   pair: string

@@ -19,6 +19,7 @@ import type {
   AdaptiveStatsResponse,
   DynamicStructureResponse,
   AdaptiveEffectiveResponse,
+  AdaptiveStateResponse,
 } from '@/lib/types'
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -196,4 +197,30 @@ export async function fetchDynamicStructure(
 // ── Adaptive effective thresholds (baseline + per-regime override) ──────
 export async function fetchAdaptiveEffective(): Promise<AdaptiveEffectiveResponse> {
   return fetchApi('/api/adaptive/effective')
+}
+
+// ── Adaptive state (overrides + audit history) ──────────────────────────
+export async function fetchAdaptiveState(): Promise<AdaptiveStateResponse> {
+  return fetchApi('/api/adaptive/state')
+}
+
+export async function rollbackAdaptive(snapshotId: string, requestedBy = 'user'): Promise<{ success: boolean; message: string }> {
+  return fetchApi(`/api/adaptive/rollback/${encodeURIComponent(snapshotId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ requestedBy }),
+  })
+}
+
+export async function setAdaptiveMasterDisabled(disabled: boolean): Promise<void> {
+  await fetchApi('/api/adaptive/disable', {
+    method: 'POST',
+    body: JSON.stringify({ disabled }),
+  })
+}
+
+export async function setAdaptiveActionDisabled(actionName: string, disabled: boolean): Promise<void> {
+  await fetchApi(`/api/adaptive/action/${encodeURIComponent(actionName)}/disable`, {
+    method: 'POST',
+    body: JSON.stringify({ disabled }),
+  })
 }

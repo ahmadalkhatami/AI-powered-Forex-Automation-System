@@ -390,7 +390,7 @@ Update setiap milestone selesai. Checkbox = done.
 - [x] Action 3: Cooldown length adaptation per direction
 - [x] Action 4: Pattern enable/disable (with auto re-enable timer 30d)
 - [x] Performance regression detector — auto-revert (P2c1)
-- [ ] Frontend: adjustment history timeline + per-action kill switch + rollback button
+- [x] Frontend: adjustment history timeline + per-action kill switch + rollback button (P2c2)
 - [ ] 6 minggu live — validate edge improvement
 
 ### P3 — Tier 2 Suggest-Only

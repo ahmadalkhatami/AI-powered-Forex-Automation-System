@@ -29,6 +29,7 @@ public static class DependencyInjection
 
         // Singletons for cross-cutting safety + audit
         services.AddSingleton<ISystemStateService, SystemStateService>();
+        services.AddSingleton<IAdaptiveStateService, AdaptiveStateService>();
         services.AddSingleton<AuditLogger>();
         services.AddScoped<BacktestRunner>();
 

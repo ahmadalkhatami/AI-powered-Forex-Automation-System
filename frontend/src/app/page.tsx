@@ -29,6 +29,7 @@ import {
   haltSystem,
   resumeSystem,
   fetchPatterns,
+  getSettings,
 } from '@/lib/api'
 import type {
   SignalHeroData,
@@ -184,6 +185,8 @@ export default function DashboardPage() {
   const [chartTimeframe, setChartTimeframe] = useState<ChartTimeframe>('M15')
   const [chartWideMode, setChartWideMode] = useState(false)
   const [patterns, setPatterns] = useState<PatternResponse | null>(null)
+  // Auto-approve confidence threshold dari settings (default 0.70 sampai loaded)
+  const [autoApproveMinConfidence, setAutoApproveMinConfidence] = useState(0.70)
   const [mifxStatus, setMifxStatus] = useState<MifxStatusResponse | null>(null)
   const [autoTrigger, setAutoTrigger] = useState(false)
   const [autoApprove, setAutoApprove] = useState(false)
@@ -323,6 +326,20 @@ export default function DashboardPage() {
     }
     fetchOnce()
     const id = setInterval(fetchOnce, 30_000)
+    return () => { alive = false; clearInterval(id) }
+  }, [])
+
+  // Load auto-approve threshold dari settings (re-fetch tiap 60s in case user ubah di /settings)
+  useEffect(() => {
+    let alive = true
+    const fetchOnce = async () => {
+      try {
+        const s = await getSettings()
+        if (alive) setAutoApproveMinConfidence(s.autoApproveMinConfidence)
+      } catch { /* silent — pakai default 0.70 */ }
+    }
+    fetchOnce()
+    const id = setInterval(fetchOnce, 60_000)
     return () => { alive = false; clearInterval(id) }
   }, [])
 
@@ -579,7 +596,7 @@ export default function DashboardPage() {
     if (rawSignal.signal !== 'BUY' && rawSignal.signal !== 'SELL') return
     // Counter-D1 setup butuh confidence lebih tinggi (sebelumnya hard veto, sekarang modifier)
     const isCounterD1 = rawSignal.warnings?.some((w) => w.startsWith('HTF MODIFIER:')) ?? false
-    const confThreshold = isCounterD1 ? 0.75 : 0.70
+    const confThreshold = autoApproveMinConfidence + (isCounterD1 ? 0.05 : 0)
     if (rawSignal.confidenceScore < confThreshold) return
     if (pageState === 'processing' || pageState === 'monitoring') return
     if (positions.some((p) => p.status === 'ACTIVE')) return
@@ -591,7 +608,7 @@ export default function DashboardPage() {
       description: `${rawSignal.signal} ${rawSignal.pair} · Confidence ${conf}% ≥ 70% + vetos passed — eksekusi otomatis`,
     })
     handleApprove()
-  }, [autoApprove, rawSignal, riskValidation, pageState, positions, handleApprove, toast])
+  }, [autoApprove, rawSignal, riskValidation, pageState, positions, handleApprove, toast, autoApproveMinConfidence])
 
   const handleHalt = async () => {
     const confirmed = typeof window !== 'undefined' &&
@@ -895,7 +912,7 @@ export default function DashboardPage() {
                 : 'Klik untuk aktifkan auto-execute'}
             >
               {autoApprove ? <Zap className="h-3.5 w-3.5" /> : <ZapOff className="h-3.5 w-3.5" />}
-              {autoApprove ? 'Exec ≥70%' : 'Exec OFF'}
+              {autoApprove ? `Exec ≥${Math.round(autoApproveMinConfidence * 100)}%` : 'Exec OFF'}
             </Button>
             <Button
               variant="outline"

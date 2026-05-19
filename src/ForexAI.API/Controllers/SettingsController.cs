@@ -30,6 +30,7 @@ public class SettingsController : ControllerBase
             NanoEquityFloorUsd:   _systemState.NanoEquityFloorUsd,
             MaxWeeklyDrawdownPct: _systemState.MaxWeeklyDrawdownPct,
             MaxTradesPerDay:      _systemState.MaxTradesPerDay,
+            AutoApproveMinConfidence: _systemState.AutoApproveMinConfidence,
             IsHalted:             _systemState.IsHalted,
             HaltReason:           _systemState.HaltReason));
     }
@@ -46,7 +47,8 @@ public class SettingsController : ControllerBase
             nanoMaxDailyLossUsd:  req.NanoMaxDailyLossUsd,
             nanoEquityFloorUsd:   req.NanoEquityFloorUsd,
             maxWeeklyDrawdownPct: req.MaxWeeklyDrawdownPct,
-            maxTradesPerDay:      req.MaxTradesPerDay);
+            maxTradesPerDay:      req.MaxTradesPerDay,
+            autoApproveMinConfidence: req.AutoApproveMinConfidence);
 
         _audit.Log("settings", "Config updated", req);
         return Get();
@@ -62,6 +64,7 @@ public record SettingsResponse(
     decimal NanoEquityFloorUsd,
     decimal MaxWeeklyDrawdownPct,
     int MaxTradesPerDay,
+    decimal AutoApproveMinConfidence,
     bool IsHalted,
     string? HaltReason);
 
@@ -73,4 +76,5 @@ public record SettingsUpdateRequest(
     decimal? NanoMaxDailyLossUsd = null,
     decimal? NanoEquityFloorUsd = null,
     decimal? MaxWeeklyDrawdownPct = null,
-    int? MaxTradesPerDay = null);
+    int? MaxTradesPerDay = null,
+    decimal? AutoApproveMinConfidence = null);

@@ -261,6 +261,7 @@ export interface SettingsResponse {
   nanoEquityFloorUsd: number
   maxWeeklyDrawdownPct: number
   maxTradesPerDay: number
+  autoApproveMinConfidence: number
   isHalted: boolean
   haltReason: string | null
 }
@@ -274,6 +275,7 @@ export interface SettingsUpdateRequest {
   nanoEquityFloorUsd?: number
   maxWeeklyDrawdownPct?: number
   maxTradesPerDay?: number
+  autoApproveMinConfidence?: number
 }
 
 export interface SignalHeroData {

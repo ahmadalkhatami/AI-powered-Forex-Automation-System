@@ -44,6 +44,10 @@ public class SystemStateService : ISystemStateService
     // Block execute kalau hari ini sudah open N posisi (counted by openedAt UTC date).
     public int MaxTradesPerDay { get; private set; } = 7;
 
+    // Confidence threshold untuk auto-execute. Manual approve always available di any GO signal.
+    // Counter-D1 setup require AutoApproveMinConfidence + 0.05 (HTF disagreement penalty).
+    public decimal AutoApproveMinConfidence { get; private set; } = 0.70m;
+
     private readonly IModeService _mode;
     private readonly object _lock = new();
 
@@ -74,6 +78,7 @@ public class SystemStateService : ISystemStateService
             LastLossDirection = null; LastLossAt = null;
             MaxSpreadPips = 2.5m; MaxConsecutiveLosses = 3; MaxHoldingMinutes = 0; CooldownMinutes = 30;
             MaxTradesPerDay = 7;
+            AutoApproveMinConfidence = 0.70m;
         }
         Load();
     }
@@ -123,7 +128,8 @@ public class SystemStateService : ISystemStateService
         decimal? nanoMaxDailyLossUsd = null,
         decimal? nanoEquityFloorUsd = null,
         decimal? maxWeeklyDrawdownPct = null,
-        int? maxTradesPerDay = null)
+        int? maxTradesPerDay = null,
+        decimal? autoApproveMinConfidence = null)
     {
         lock (_lock)
         {
@@ -135,6 +141,7 @@ public class SystemStateService : ISystemStateService
             if (nanoEquityFloorUsd    is decimal m6 && m6 > 0m) NanoEquityFloorUsd    = m6;
             if (maxWeeklyDrawdownPct  is decimal m7 && m7 > 0m && m7 <= 0.5m) MaxWeeklyDrawdownPct = m7;
             if (maxTradesPerDay       is int     m8 && m8 > 0 && m8 <= 50) MaxTradesPerDay = m8;
+            if (autoApproveMinConfidence is decimal m9 && m9 >= 0.3m && m9 <= 0.95m) AutoApproveMinConfidence = m9;
             Save_NoLock();
         }
     }
@@ -164,7 +171,8 @@ public class SystemStateService : ISystemStateService
         decimal NanoMaxDailyLossUsd = 5m,
         decimal NanoEquityFloorUsd  = 20m,
         decimal MaxWeeklyDrawdownPct = 0.05m,
-        int MaxTradesPerDay = 7);
+        int MaxTradesPerDay = 7,
+        decimal AutoApproveMinConfidence = 0.70m);
 
     private void Save_NoLock()
     {
@@ -175,7 +183,7 @@ public class SystemStateService : ISystemStateService
                 MaxSpreadPips, MaxConsecutiveLosses, MaxHoldingMinutes,
                 LastLossDirection, LastLossAt, CooldownMinutes,
                 NanoMaxDailyLossUsd, NanoEquityFloorUsd, MaxWeeklyDrawdownPct,
-                MaxTradesPerDay);
+                MaxTradesPerDay, AutoApproveMinConfidence);
             var json = JsonSerializer.Serialize(snap, new JsonSerializerOptions { WriteIndented = true });
             var path = PersistPath;
             var tmp  = path + ".tmp";
@@ -208,6 +216,8 @@ public class SystemStateService : ISystemStateService
                 NanoEquityFloorUsd   = snap.NanoEquityFloorUsd  > 0m ? snap.NanoEquityFloorUsd  : 20m;
                 MaxWeeklyDrawdownPct = snap.MaxWeeklyDrawdownPct > 0m ? snap.MaxWeeklyDrawdownPct : 0.05m;
                 MaxTradesPerDay      = snap.MaxTradesPerDay > 0 ? snap.MaxTradesPerDay : 7;
+                AutoApproveMinConfidence = snap.AutoApproveMinConfidence >= 0.3m && snap.AutoApproveMinConfidence <= 0.95m
+                                           ? snap.AutoApproveMinConfidence : 0.70m;
             }
         }
         catch { /* corrupt — ignore */ }

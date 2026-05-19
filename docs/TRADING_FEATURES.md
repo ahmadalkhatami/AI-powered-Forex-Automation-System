@@ -143,7 +143,7 @@ Status legend:
 | R:R indicator di PositionCard | ✅ Live | Planned 1:RR + realized R bar + current price marker |
 | Settings UI | ✅ Live | `/settings` route — edit thresholds tanpa edit file |
 | Auto-trigger analysis | ✅ Live | New bar detection, auto-run pipeline |
-| Auto-approve high-conf (≥70%) | ✅ Live | Confidence threshold gate |
+| **Auto-approve dengan dynamic threshold** | ✅ Live | Configurable via Settings UI (default 70%). Counter-D1 setup auto-bumped +5%. Manual approve always available regardless. Exec button label menampilkan threshold aktif (e.g. "Exec ≥65%"). |
 | Audit log viewer | ✅ Live | `/audit` route |
 | Backtest UI | ✅ Live | `/backtest` route |
 | FVG zone overlay on chart | 📋 Planned | Endpoint sudah ada, FE rendering belum |

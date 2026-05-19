@@ -27,6 +27,7 @@ const FIELDS: FieldDef[] = [
   { key: 'nanoEquityFloorUsd',   label: 'Nano Equity Floor',    description: 'Permanent halt kalau equity drop ke level ini ($)', unit: '$', step: 1, min: 5, max: 100, type: 'number' },
   { key: 'maxWeeklyDrawdownPct', label: 'Weekly DD Cap',        description: 'Halt kalau realized loss 7 hari > N% equity', unit: '%', step: 0.005, min: 0.01, max: 0.20, type: 'percent' },
   { key: 'maxTradesPerDay',      label: 'Max Trades/Day',       description: 'Block execute kalau hari ini sudah open N trade — overtrade prevention untuk M15 scalping', unit: 'trades', step: 1, min: 1, max: 50, type: 'number' },
+  { key: 'autoApproveMinConfidence', label: 'Auto-Approve Min Confidence', description: 'Confidence minimum untuk auto-execute (Exec ON mode). Counter-D1 setup require +5% extra. Manual approve always works regardless.', unit: '%', step: 0.01, min: 0.30, max: 0.95, type: 'percent' },
 ]
 
 export default function SettingsPage() {

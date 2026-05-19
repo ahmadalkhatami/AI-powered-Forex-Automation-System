@@ -32,6 +32,11 @@ public interface ISystemStateService
     // Max trade/hari — overtrade prevention untuk M15 scalping (default 7)
     int              MaxTradesPerDay      { get; }
 
+    // Confidence threshold untuk auto-execute (default 0.70 = 70%).
+    // Counter-D1 setup require AutoApproveMinConfidence + 0.05.
+    // Manual approve always works regardless of threshold.
+    decimal          AutoApproveMinConfidence { get; }
+
     void Halt(string reason);
     void Resume();
     void RegisterLoss(SignalDirection direction);
@@ -45,5 +50,6 @@ public interface ISystemStateService
         decimal? nanoMaxDailyLossUsd = null,
         decimal? nanoEquityFloorUsd = null,
         decimal? maxWeeklyDrawdownPct = null,
-        int? maxTradesPerDay = null);
+        int? maxTradesPerDay = null,
+        decimal? autoApproveMinConfidence = null);
 }

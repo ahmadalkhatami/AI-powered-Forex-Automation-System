@@ -200,14 +200,66 @@ Feature yang di-evaluate tapi decide NOT implement:
 
 ---
 
-## 9. Roadmap Indicative
+## 9. Adaptive Self-Learning System
 
-Setelah live test 2-4 minggu dengan current features:
+📋 **Planned · roadmap discussion 2026-05-19** — sistem trading yang adaptif belajar dari hasil tanpa user prompt setiap loss. Full design + 4-phase rollout di [adaptive-learning-roadmap.md](adaptive-learning-roadmap.md).
+
+### Tier Klasifikasi Parameter
+
+| Tier | Risk | Action Type | Status |
+|------|------|-------------|--------|
+| **Tier 0** | Never auto-tune | Safety invariants (MaxDD, EquityFloor, MaxSpread, MaxWeeklyDD) | ✅ Hardcoded (locked) |
+| **Tier 1** | Low risk, auto-fire | Session/regime penalty, cooldown length, pattern enable/disable | 📋 P2 target |
+| **Tier 2** | Medium, manual approve | Pattern/breakout boost magnitude | 📋 P3 target |
+| **Tier 3** | High risk, BLOCKED | SL multiplier, RR ratio, weight formula | ❌ Not planned |
+
+### Phase Plan (high-level)
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| **P0** Trade Journal Enrich | 📋 Pending | Tambah session, patternMatch, sweepDetected, zoneAtEntry, MFE, MAE, holdingMinutes, exitReason ke trade record |
+| **P1** Observe Only | 📋 Pending | Dashboard panel per-bucket WR + expectancy + Wilson CI. **No auto-action.** |
+| **P2** Tier 1 Activate | 📋 Pending | 4 Tier 1 actions auto-fire dengan audit + kill switches |
+| **P3** Tier 2 Suggest-Only | 📋 Pending | Manual-approve UI untuk pattern boost tuning |
+| **P4** Bayesian Bucket Scoring | 📋 Future | Thompson sampling — butuh 500+ trade |
+
+### Tier 1 Actions (4 — P2 target)
+
+1. **Per-regime confidence threshold** — bounds `[0.60, 0.85]`, sample ≥ 20, cooldown 24h
+2. **Session penalty / skip** — penalty ≤ -15%, skip 7 hari auto re-enable
+3. **Cooldown length adaptation** — bounds `[15, 120]` min, per-direction
+4. **Pattern enable/disable** — binary on/off, 30 hari auto re-enable
+
+### Statistical Safeguards
+
+- **Global ≥ 50 total trade** sebelum Adaptive Engine aktif (warm-up gate)
+- Min sample size 20 per bucket (30 untuk skip/disable)
+- Wilson score interval lower bound test
+- Rolling window 30 trade default
+- Per-action cooldown 24h-30d
+- Master + per-action kill switches di Settings UI
+- Performance regression auto-revert kalau expectancy negatif ≥ 10 trade
+- **Config snapshot before/after + reason JSON** sebelum tiap auto-change → 1-click rollback via Settings UI
+
+### Progress Tracker
+
+Update setiap milestone di [adaptive-learning-roadmap.md § 11](adaptive-learning-roadmap.md). Snapshot:
+
+- P0: **8/8 task ✅ complete** (2026-05-19)
+- P1: 0/5 task
+- P2: 0/13 task
+- P3: 0/4 task
+
+---
+
+## 10. Roadmap Indicative (Pre-Adaptive Wave)
+
+Wave berikut ini sudah di-supersede sebagian oleh § 9 Adaptive Roadmap, tapi item non-adaptive (FE rendering, detector baru) tetap relevan:
 
 **Wave 1** (data-driven validation):
 1. Collect 30-50 trade dengan filter baru aktif
 2. Check `/api/analytics/performance` — apakah breakout & pattern filter actually boost win rate
-3. Tune confidence/breakout thresholds based on real data
+3. ~~Tune confidence/breakout thresholds based on real data~~ → digantikan Adaptive P2
 
 **Wave 2** (kalau Wave 1 confirm edge):
 1. FVG chart overlay (rendering di chart yang sudah ada endpoint)
@@ -217,6 +269,6 @@ Setelah live test 2-4 minggu dengan current features:
 
 **Wave 3** (production hardening):
 1. Mobile-responsive review
-2. Trade journal automation (screenshot + reason capture)
+2. Trade journal automation (screenshot + reason capture) → overlap dengan Adaptive P0
 3. Multi-TF alignment indicator chip
 4. Settings advanced (per-strategy)

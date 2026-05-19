@@ -27,7 +27,19 @@ internal static class DtoMapper
         Mode = p.Mode,
         SkipReason = p.SkipReason,
         ExternalTradeId = p.ExternalTradeId,
-        Timeframe = p.Timeframe
+        Timeframe = p.Timeframe,
+        // Adaptive Learning enrich fields
+        SessionAtEntry = p.SessionAtEntry,
+        RegimeAtEntry = p.RegimeAtEntry,
+        PatternName = p.PatternName,
+        PatternBias = p.PatternBias,
+        PatternReliability = p.PatternReliability,
+        SweepDetected = p.SweepDetected,
+        ZoneAtEntry = p.ZoneAtEntry,
+        ConfidenceAtEntry = p.ConfidenceAtEntry,
+        MfePips = p.MfePips,
+        MaePips = p.MaePips,
+        ExitReason = p.ExitReason
     };
 
     public static TradePosition ToDomain(TradePositionDto dto)
@@ -49,7 +61,18 @@ internal static class DtoMapper
                 dto.FloatingPnl, dto.FloatingPnlPips,
                 dto.OpenedAt, dto.ClosedAt, status, dto.Mode,
                 externalTradeId: dto.ExternalTradeId,
-                timeframe: dto.Timeframe),
+                timeframe: dto.Timeframe,
+                sessionAtEntry: dto.SessionAtEntry,
+                regimeAtEntry: dto.RegimeAtEntry,
+                patternName: dto.PatternName,
+                patternBias: dto.PatternBias,
+                patternReliability: dto.PatternReliability,
+                sweepDetected: dto.SweepDetected,
+                zoneAtEntry: dto.ZoneAtEntry,
+                confidenceAtEntry: dto.ConfidenceAtEntry,
+                mfePips: dto.MfePips,
+                maePips: dto.MaePips,
+                exitReason: dto.ExitReason),
 
             TradeStatus.CLOSED_WIN or TradeStatus.CLOSED_LOSS => TradePosition.CreateFromHistory(
                 dto.TradeId, dto.RunId, dto.Pair, direction,
@@ -58,7 +81,18 @@ internal static class DtoMapper
                 dto.FloatingPnl, dto.FloatingPnlPips,
                 dto.OpenedAt, dto.ClosedAt, status, dto.Mode,
                 externalTradeId: dto.ExternalTradeId,
-                timeframe: dto.Timeframe),
+                timeframe: dto.Timeframe,
+                sessionAtEntry: dto.SessionAtEntry,
+                regimeAtEntry: dto.RegimeAtEntry,
+                patternName: dto.PatternName,
+                patternBias: dto.PatternBias,
+                patternReliability: dto.PatternReliability,
+                sweepDetected: dto.SweepDetected,
+                zoneAtEntry: dto.ZoneAtEntry,
+                confidenceAtEntry: dto.ConfidenceAtEntry,
+                mfePips: dto.MfePips,
+                maePips: dto.MaePips,
+                exitReason: dto.ExitReason),
 
             _ => TradePosition.CreateSkipped(dto.TradeId, dto.RunId, dto.Pair, "unknown status")
         };

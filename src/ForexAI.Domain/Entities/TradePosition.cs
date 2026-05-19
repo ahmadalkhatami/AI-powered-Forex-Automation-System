@@ -1,4 +1,5 @@
 using ForexAI.Domain.Enums;
+using ForexAI.Domain.ValueObjects;
 
 namespace ForexAI.Domain.Entities;
 
@@ -26,6 +27,50 @@ public class TradePosition
     /// <summary>Signal timeframe asal trade (M15/H1/D1) — untuk per-TF time stop.</summary>
     public string? Timeframe { get; private set; }
 
+    // ── Adaptive Learning enrichment fields (P0 trade journal enrich) ────────
+    // Captured saat entry untuk per-bucket analytics (regime/session/pattern/zone)
+    // dan tracking outcome (MFE/MAE/exitReason).
+    // Semua nullable — backward compat dengan trade existing yang belum ada fields ini.
+
+    /// <summary>Session aktif saat entry: London / NewYork / Tokyo / Sydney / Overlap / Closed.</summary>
+    public string? SessionAtEntry { get; private set; }
+
+    /// <summary>Regime market saat entry: Trending / Ranging / Transitional / Volatile.</summary>
+    public string? RegimeAtEntry { get; private set; }
+
+    /// <summary>Candlestick pattern name saat entry (e.g. "Bullish Pin Bar", "None").</summary>
+    public string? PatternName { get; private set; }
+
+    /// <summary>Pattern bias: Bullish / Bearish / Neutral.</summary>
+    public string? PatternBias { get; private set; }
+
+    /// <summary>Pattern reliability 0.0-1.0.</summary>
+    public decimal? PatternReliability { get; private set; }
+
+    /// <summary>True kalau liquidity sweep detected saat entry signal.</summary>
+    public bool? SweepDetected { get; private set; }
+
+    /// <summary>Premium / Discount / Equilibrium zone saat entry.</summary>
+    public string? ZoneAtEntry { get; private set; }
+
+    /// <summary>Confidence score saat entry (0.0-1.0). Copied dari signal.</summary>
+    public decimal? ConfidenceAtEntry { get; private set; }
+
+    /// <summary>Max favorable excursion (pips) during hold — tracked per tick sync.</summary>
+    public int? MfePips { get; private set; }
+
+    /// <summary>Max adverse excursion (pips) during hold — tracked per tick sync.</summary>
+    public int? MaePips { get; private set; }
+
+    /// <summary>Exit reason: SL_HIT / TP_HIT / BREAKEVEN / TRAILING_STOP / TIME_STOP / MANUAL / BROKER_AUTO.</summary>
+    public string? ExitReason { get; private set; }
+
+    /// <summary>Holding duration in minutes (computed dari OpenedAt + ClosedAt).</summary>
+    public int? HoldingMinutes =>
+        OpenedAt.HasValue && ClosedAt.HasValue
+            ? (int)(ClosedAt.Value - OpenedAt.Value).TotalMinutes
+            : null;
+
     // Required for ORM/serialization
     private TradePosition() { TradeId = null!; RunId = null!; Pair = null!; Mode = null!; }
 
@@ -41,7 +86,8 @@ public class TradePosition
         decimal riskAmount,
         decimal potentialProfit,
         decimal riskReward,
-        string? timeframe = null)
+        string? timeframe = null,
+        TradeEntryContext? entryContext = null)
     {
         return new TradePosition
         {
@@ -61,7 +107,15 @@ public class TradePosition
             FloatingPnlPips = 0,
             OpenedAt = DateTimeOffset.UtcNow,
             Mode = "SIMULATION",
-            Timeframe = timeframe
+            Timeframe = timeframe,
+            SessionAtEntry = entryContext?.Session,
+            RegimeAtEntry = entryContext?.Regime,
+            PatternName = entryContext?.PatternName,
+            PatternBias = entryContext?.PatternBias,
+            PatternReliability = entryContext?.PatternReliability,
+            SweepDetected = entryContext?.SweepDetected,
+            ZoneAtEntry = entryContext?.Zone,
+            ConfidenceAtEntry = entryContext?.Confidence
         };
     }
 
@@ -79,7 +133,8 @@ public class TradePosition
         decimal riskReward,
         string mode,
         string? externalTradeId,
-        string? timeframe = null)
+        string? timeframe = null,
+        TradeEntryContext? entryContext = null)
     {
         return new TradePosition
         {
@@ -100,7 +155,15 @@ public class TradePosition
             OpenedAt = DateTimeOffset.UtcNow,
             Mode = mode,
             ExternalTradeId = externalTradeId,
-            Timeframe = timeframe
+            Timeframe = timeframe,
+            SessionAtEntry = entryContext?.Session,
+            RegimeAtEntry = entryContext?.Regime,
+            PatternName = entryContext?.PatternName,
+            PatternBias = entryContext?.PatternBias,
+            PatternReliability = entryContext?.PatternReliability,
+            SweepDetected = entryContext?.SweepDetected,
+            ZoneAtEntry = entryContext?.Zone,
+            ConfidenceAtEntry = entryContext?.Confidence
         };
     }
 
@@ -144,7 +207,18 @@ public class TradePosition
         TradeStatus status,
         string mode,
         string? externalTradeId = null,
-        string? timeframe = null)
+        string? timeframe = null,
+        string? sessionAtEntry = null,
+        string? regimeAtEntry = null,
+        string? patternName = null,
+        string? patternBias = null,
+        decimal? patternReliability = null,
+        bool? sweepDetected = null,
+        string? zoneAtEntry = null,
+        decimal? confidenceAtEntry = null,
+        int? mfePips = null,
+        int? maePips = null,
+        string? exitReason = null)
     {
         return new TradePosition
         {
@@ -166,8 +240,38 @@ public class TradePosition
             ClosedAt = closedAt,
             Mode = mode,
             ExternalTradeId = externalTradeId,
-            Timeframe = timeframe
+            Timeframe = timeframe,
+            SessionAtEntry = sessionAtEntry,
+            RegimeAtEntry = regimeAtEntry,
+            PatternName = patternName,
+            PatternBias = patternBias,
+            PatternReliability = patternReliability,
+            SweepDetected = sweepDetected,
+            ZoneAtEntry = zoneAtEntry,
+            ConfidenceAtEntry = confidenceAtEntry,
+            MfePips = mfePips,
+            MaePips = maePips,
+            ExitReason = exitReason
         };
+    }
+
+    /// <summary>
+    /// Track MFE (max favorable) + MAE (max adverse) excursion per tick sync.
+    /// Dipanggil oleh MifxPositionSyncService setiap update floating PnL.
+    /// </summary>
+    public void TrackExcursion()
+    {
+        if (Status != TradeStatus.ACTIVE) return;
+        if (FloatingPnlPips > 0 && (MfePips is null || FloatingPnlPips > MfePips))
+            MfePips = FloatingPnlPips;
+        if (FloatingPnlPips < 0 && (MaePips is null || FloatingPnlPips < MaePips))
+            MaePips = FloatingPnlPips;
+    }
+
+    /// <summary>Set exit reason — dipanggil saat close trigger (SL/TP/manual/etc).</summary>
+    public void SetExitReason(string reason)
+    {
+        if (string.IsNullOrEmpty(ExitReason)) ExitReason = reason;
     }
 
     public bool IsActive() => Status == TradeStatus.ACTIVE;

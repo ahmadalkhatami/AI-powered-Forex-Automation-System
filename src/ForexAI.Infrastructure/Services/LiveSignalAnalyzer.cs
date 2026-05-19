@@ -454,6 +454,21 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
         var warnings = BuildWarnings(snap, signal, confidenceScore, trend, momentum);
         foreach (var v in vetoReasons) warnings.Add(v);
 
+        // ── Build adaptive learning enrich context (P0 trade journal) ─────────
+        // Captured terlepas dari signal direction — even HOLD signals memberi data analytics.
+        string entryZone = pctFromSupport > 0.65m ? "Premium" :
+                           pctFromSupport < 0.35m ? "Discount" : "Equilibrium";
+
+        var entryContext = new TradeEntryContext(
+            Session:            SessionDetector.Detect(DateTimeOffset.UtcNow),
+            Regime:             snap.Regime,
+            PatternName:        pattern.Name == "None" ? null : pattern.Name,
+            PatternBias:        pattern.Name == "None" ? null : pattern.Bias,
+            PatternReliability: pattern.Name == "None" ? null : pattern.Reliability,
+            SweepDetected:      liquiditySweep.Detected,
+            Zone:               entryZone,
+            Confidence:         confidenceScore);
+
         return new TradeSignal(
             runId:           Guid.NewGuid().ToString("N")[..12],
             pair:            snap.Pair,
@@ -466,7 +481,8 @@ public class LiveSignalAnalyzer : ISignalAnalyzer
             momentum:        momentum,
             structure:       structure,
             parameters:      parameters,
-            warnings:        warnings.AsReadOnly());
+            warnings:        warnings.AsReadOnly(),
+            entryContext:    entryContext);
     }
 
     // ── Trend Analysis ────────────────────────────────────────────────────────

@@ -39,6 +39,7 @@ public class ClosePositionHandler : IRequestHandler<ClosePositionCommand, TradeP
                 exitPrice = closeResult.ExecutedPrice;
         }
 
+        position.SetExitReason("MANUAL");
         position.CloseManually(request.Outcome, exitPrice);
         await _positions.SaveAsync(position);
 

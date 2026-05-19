@@ -369,7 +369,8 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
                 p.RiskRewardRatio,
                 mode: "MIFX_DEMO",
                 externalTradeId: brokerResult.ExternalId,
-                timeframe: signal.Timeframe);
+                timeframe: signal.Timeframe,
+                entryContext: signal.EntryContext);
 
             // Slippage tracking — entry actual vs requested. Negative = adverse fill.
             decimal slippagePips = 0m;
@@ -399,7 +400,8 @@ public class ExecuteTradeHandler : IRequestHandler<ExecuteTradeCommand, TradePos
                 p.RiskAmount,
                 p.PotentialProfit,
                 p.RiskRewardRatio,
-                timeframe: signal.Timeframe);
+                timeframe: signal.Timeframe,
+                entryContext: signal.EntryContext);
 
             _logger.LogInformation(
                 "Trade OPEN [SIMULATION] {TradeId} — {Direction} {Pair} @ {Entry}, SL {SL}, TP {TP}, lot {Lot}",

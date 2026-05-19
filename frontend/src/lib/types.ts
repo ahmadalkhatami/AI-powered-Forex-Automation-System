@@ -398,6 +398,19 @@ export interface TradePositionResponse {
   closedAt: string | null
   mode: string
   skipReason: string | null
+  // Adaptive Learning enrich fields (P0). Nullable di backend, optional di FE.
+  sessionAtEntry?: string | null
+  regimeAtEntry?: string | null
+  patternName?: string | null
+  patternBias?: 'Bullish' | 'Bearish' | 'Neutral' | null
+  patternReliability?: number | null
+  sweepDetected?: boolean | null
+  zoneAtEntry?: 'Premium' | 'Discount' | 'Equilibrium' | null
+  confidenceAtEntry?: number | null
+  mfePips?: number | null
+  maePips?: number | null
+  exitReason?: 'SL_HIT' | 'TP_HIT' | 'BREAKEVEN' | 'TRAILING_STOP' | 'TIME_STOP' | 'MANUAL' | 'BROKER_AUTO' | null
+  holdingMinutes?: number | null
 }
 
 // --- API Request Types ---

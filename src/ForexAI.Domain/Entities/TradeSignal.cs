@@ -20,6 +20,14 @@ public class TradeSignal
     public IReadOnlyList<string> Warnings { get; private set; }
     public DateTimeOffset Timestamp { get; private set; }
 
+    /// <summary>
+    /// Adaptive learning enrich context — populated saat signal generation (regime, session,
+    /// pattern detected, sweep flag, zone, confidence). Dipakai ExecuteTradeHandler untuk
+    /// stamp TradePosition.SessionAtEntry/RegimeAtEntry/etc. Optional — kalau null, fallback
+    /// ke null di TradePosition (legacy).
+    /// </summary>
+    public TradeEntryContext? EntryContext { get; private set; }
+
     // Required for ORM/serialization
     private TradeSignal() { RunId = null!; Pair = null!; Timeframe = null!; Snapshot = null!; Trend = null!; Momentum = null!; Structure = null!; Parameters = null!; Warnings = null!; }
 
@@ -35,7 +43,8 @@ public class TradeSignal
         MomentumAnalysis momentum,
         StructureAnalysis structure,
         TradeParameters parameters,
-        IReadOnlyList<string> warnings)
+        IReadOnlyList<string> warnings,
+        TradeEntryContext? entryContext = null)
     {
         Id = Guid.NewGuid();
         RunId = runId;
@@ -51,6 +60,7 @@ public class TradeSignal
         Parameters = parameters;
         Warnings = warnings;
         Timestamp = DateTimeOffset.UtcNow;
+        EntryContext = entryContext;
     }
 
     public static TradeSignal CreateFromHistory(
@@ -67,7 +77,8 @@ public class TradeSignal
         StructureAnalysis structure,
         TradeParameters parameters,
         IReadOnlyList<string> warnings,
-        DateTimeOffset timestamp)
+        DateTimeOffset timestamp,
+        TradeEntryContext? entryContext = null)
     {
         return new TradeSignal
         {
@@ -84,7 +95,8 @@ public class TradeSignal
             Structure = structure,
             Parameters = parameters,
             Warnings = warnings,
-            Timestamp = timestamp
+            Timestamp = timestamp,
+            EntryContext = entryContext
         };
     }
 

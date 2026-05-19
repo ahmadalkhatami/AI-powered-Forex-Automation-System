@@ -103,6 +103,8 @@ public class MifxPositionSyncService
             {
                 // Masih open di MT5 — update floating PnL dari nilai broker langsung
                 local.UpdatePnlFromBroker(bp.Profit, bp.Pips);
+                // Track MFE/MAE setiap tick — untuk adaptive learning analytics
+                local.TrackExcursion();
                 toUpdate.Add(local);
 
                 // Skip semua trigger close kalau sudah ada close request in-flight
@@ -127,6 +129,7 @@ public class MifxPositionSyncService
                         _logger.LogWarning(
                             "Trailing stop fire: {Id} peakR={Peak:F2} currentR={Cur:F2} (give back ≥{Give:F1}R) — close",
                             local.TradeId, peakR, currentR, trailGiveBack);
+                        local.SetExitReason("TRAILING_STOP");
                         _closingInProgress.TryAdd(local.TradeId, 0);
                         FireCloseWithLogging(local);
                     }
@@ -136,6 +139,7 @@ public class MifxPositionSyncService
                         _logger.LogWarning(
                             "Breakeven fire: {Id} peakR={Peak:F2} currentR={Cur:F2} — price reverse ke entry, close",
                             local.TradeId, peakR, currentR);
+                        local.SetExitReason("BREAKEVEN");
                         _closingInProgress.TryAdd(local.TradeId, 0);
                         FireCloseWithLogging(local);
                     }
@@ -156,6 +160,7 @@ public class MifxPositionSyncService
                             _logger.LogWarning(
                                 "Time stop fire: {Id} (TF={Tf}) held {Age:F0} min ≥ {Max} min — close otomatis",
                                 local.TradeId, local.Timeframe ?? "?", ageMinutes, hardCap.Value);
+                            local.SetExitReason("TIME_STOP");
                             _closingInProgress.TryAdd(local.TradeId, 0);
                             FireCloseWithLogging(local);
                         }
@@ -168,6 +173,12 @@ public class MifxPositionSyncService
                 var outcome = local.FloatingPnl >= 0m
                     ? TradeStatus.CLOSED_WIN
                     : TradeStatus.CLOSED_LOSS;
+
+                // Infer exit reason kalau belum di-set (broker-side close → SL_HIT/TP_HIT)
+                if (string.IsNullOrEmpty(local.ExitReason))
+                {
+                    local.SetExitReason(outcome == TradeStatus.CLOSED_WIN ? "TP_HIT" : "SL_HIT");
+                }
 
                 local.ClosedByBroker(outcome);
                 toUpdate.Add(local);

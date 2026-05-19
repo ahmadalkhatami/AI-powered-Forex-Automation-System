@@ -22,4 +22,17 @@ internal record TradePositionDto
     public string? SkipReason { get; init; }
     public string? ExternalTradeId { get; init; }
     public string? Timeframe { get; init; }
+
+    // Adaptive Learning enrich (P0). Nullable — backward compat dengan trade existing.
+    public string? SessionAtEntry { get; init; }
+    public string? RegimeAtEntry { get; init; }
+    public string? PatternName { get; init; }
+    public string? PatternBias { get; init; }
+    public decimal? PatternReliability { get; init; }
+    public bool? SweepDetected { get; init; }
+    public string? ZoneAtEntry { get; init; }
+    public decimal? ConfidenceAtEntry { get; init; }
+    public int? MfePips { get; init; }
+    public int? MaePips { get; init; }
+    public string? ExitReason { get; init; }
 }
